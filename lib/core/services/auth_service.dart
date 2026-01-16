@@ -293,34 +293,52 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = response.data;
         print('Google Auth Response Data: $data'); // Debug print
-        print('Data type: ${data.runtimeType}'); // Debug print
-
-        if (data is! Map<String, dynamic>) {
+        
+        if (data is! Map) {
           return AuthResult(success: false, error: 'Invalid response format: ${data.runtimeType}');
         }
         
+        final safedata = Map<String, dynamic>.from(data);
+        
+        // Extract values safely
+        final accessToken = safedata['access_token']?.toString() ?? '';
+        final refreshToken = safedata['refresh_token']?.toString() ?? '';
+        
+        dynamic userMap = safedata['user'];
+        String? userId;
+        
+        if (userMap is Map) {
+          userId = userMap['id']?.toString();
+        }
+        userId ??= safedata['user_id']?.toString();
+
         // Store tokens
         await _client.storeTokens(
-          accessToken: data['access_token']?.toString() ?? '',
-          refreshToken: data['refresh_token']?.toString() ?? '',
-          userId: data['user']?['id']?.toString() ?? data['user_id']?.toString(),
+          accessToken: accessToken,
+          refreshToken: refreshToken,
+          userId: userId,
         );
 
-        // Parse user - handle different response formats
+        // Parse user safely
         User? user;
-        if (data['user'] != null && data['user'] is Map<String, dynamic>) {
-          user = User.fromJson(data['user'] as Map<String, dynamic>);
-        } else {
-          // Create user from individual fields if available
+        if (userMap is Map) {
+          try {
+            user = User.fromJson(Map<String, dynamic>.from(userMap));
+          } catch (e) {
+            print('User parsing error: $e');
+          }
+        }
+        
+        if (user == null) {
+          // Fallback creation
           user = User(
-            id: data['user']?['id']?.toString() ?? data['user_id']?.toString() ?? '',
-            username: data['user']?['username']?.toString() ?? data['username']?.toString() ?? googleUser.displayName ?? 'User',
-            email: data['user']?['email']?.toString() ?? data['email']?.toString() ?? googleUser.email,
+            id: userId ?? '',
+            username: (userMap is Map ? userMap['username'] : null)?.toString() ?? safedata['username']?.toString() ?? googleUser.displayName ?? 'User',
+            email: (userMap is Map ? userMap['email'] : null)?.toString() ?? safedata['email']?.toString() ?? googleUser.email,
             createdAt: DateTime.now(),
           );
         }
 
-        // Save user data locally for persistent login
         if (user != null) {
           await saveUserToLocal(user);
         }

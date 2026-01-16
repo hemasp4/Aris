@@ -3,10 +3,10 @@
 class ApiConstants {
   ApiConstants._();
 
-  // Base URL - Using Ngrok for cross-platform access
-  // Backend: FastAPI in WSL2 -> Ngrok tunnel
-  // Frontend: Flutter on Windows
-  static String _baseUrl = 'https://maricela-unemotional-abjectly.ngrok-free.dev';
+  // Base URL - Using localhost for same-machine development
+  // For mobile/cross-platform: use ngrok URL
+  // For web on same machine: use localhost
+  static String _baseUrl = 'http://localhost:8000';
   
   static String get baseUrl => _baseUrl;
   static String get apiVersion => '/api/v1';

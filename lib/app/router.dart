@@ -3,10 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/chat/presentation/screens/chat_screen.dart';
+import '../features/chat/presentation/screens/shared_chat_screen.dart';
 import '../features/auth/presentation/screens/login_screen.dart';
 import '../features/auth/presentation/screens/register_screen.dart';
 import '../features/settings/presentation/screens/settings_screen.dart';
+import '../features/settings/presentation/screens/speech_settings_screen.dart';
+import '../features/settings/presentation/screens/data_controls_screen.dart';
+import '../features/settings/presentation/screens/security_settings_screen.dart';
+import '../features/settings/presentation/screens/general_settings_screen.dart';
+import '../features/settings/presentation/screens/personalization_screen.dart';
+import '../features/settings/presentation/screens/about_screen.dart';
 import '../features/vault/presentation/screens/vault_screen.dart';
+import '../features/insights/presentation/screens/scheduled_insights_screen.dart';
 import '../features/auth/providers/auth_provider.dart';
 
 /// Key for router refresh
@@ -50,9 +58,53 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const SettingsScreen(),
       ),
       GoRoute(
+        path: '/settings/speech',
+        name: 'speechSettings',
+        builder: (context, state) => const SpeechSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/data-controls',
+        name: 'dataControlsSettings',
+        builder: (context, state) => const DataControlsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/security',
+        name: 'securitySettings',
+        builder: (context, state) => const SecuritySettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/general',
+        name: 'generalSettings',
+        builder: (context, state) => const GeneralSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/personalization',
+        name: 'personalizationSettings',
+        builder: (context, state) => const PersonalizationScreen(),
+      ),
+      GoRoute(
+        path: '/settings/about',
+        name: 'aboutSettings',
+        builder: (context, state) => const AboutScreen(),
+      ),
+      GoRoute(
         path: '/vault',
         name: 'vault',
         builder: (context, state) => const VaultScreen(),
+      ),
+      GoRoute(
+        path: '/insights',
+        name: 'insights',
+        builder: (context, state) => const ScheduledInsightsScreen(),
+      ),
+      // Shared chat route (no auth required)
+      GoRoute(
+        path: '/shared/:shareId',
+        name: 'sharedChat',
+        builder: (context, state) {
+          final shareId = state.pathParameters['shareId']!;
+          return SharedChatScreen(shareId: shareId);
+        },
       ),
     ],
     redirect: (context, state) {
@@ -61,9 +113,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           authState.status == AuthStatus.initial;
       final isAuthRoute = state.matchedLocation == '/login' ||
           state.matchedLocation == '/register';
+      final isSharedRoute = state.matchedLocation.startsWith('/shared/');
 
       // Don't redirect while checking initial auth state
       if (isLoading) {
+        return null;
+      }
+
+      // Allow shared routes without auth
+      if (isSharedRoute) {
         return null;
       }
 
@@ -125,6 +183,46 @@ final appRouter = GoRouter(
       path: '/settings',
       name: 'settings',
       builder: (context, state) => const SettingsScreen(),
+    ),
+    GoRoute(
+      path: '/settings/speech',
+      name: 'speechSettings',
+      builder: (context, state) => const SpeechSettingsScreen(),
+    ),
+    GoRoute(
+      path: '/settings/data-controls',
+      name: 'dataControlsSettings',
+      builder: (context, state) => const DataControlsScreen(),
+    ),
+    GoRoute(
+      path: '/settings/security',
+      name: 'securitySettings',
+      builder: (context, state) => const SecuritySettingsScreen(),
+    ),
+    GoRoute(
+      path: '/settings/general',
+      name: 'generalSettings',
+      builder: (context, state) => const GeneralSettingsScreen(),
+    ),
+    GoRoute(
+      path: '/settings/personalization',
+      name: 'personalizationSettings',
+      builder: (context, state) => const PersonalizationScreen(),
+    ),
+    GoRoute(
+      path: '/settings/about',
+      name: 'aboutSettings',
+      builder: (context, state) => const AboutScreen(),
+    ),
+    GoRoute(
+      path: '/vault',
+      name: 'vault',
+      builder: (context, state) => const VaultScreen(),
+    ),
+    GoRoute(
+      path: '/insights',
+      name: 'insights',
+      builder: (context, state) => const ScheduledInsightsScreen(),
     ),
   ],
 );

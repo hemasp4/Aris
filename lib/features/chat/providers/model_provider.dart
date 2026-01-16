@@ -79,7 +79,13 @@ class ModelNotifier extends StateNotifier<ModelState> {
       // Set default model if none selected
       String? selected = state.selectedModel;
       if (selected == null && models.isNotEmpty) {
-        selected = models.first.name;
+        // Prioritize Qwen 2.5 Coder for local development
+        final qwenIndex = models.indexWhere((m) => m.name.contains('qwen2.5-coder'));
+        if (qwenIndex != -1) {
+          selected = models[qwenIndex].name;
+        } else {
+          selected = models.first.name;
+        }
       }
 
       state = state.copyWith(
@@ -102,7 +108,7 @@ class ModelNotifier extends StateNotifier<ModelState> {
   }
 
   /// Get current model for chat requests
-  String get currentModel => state.selectedModel ?? 'llama3.2';
+  String get currentModel => state.selectedModel ?? 'gemini-2.0-flash';
 }
 
 /// Provider for model state
@@ -112,7 +118,7 @@ final modelProvider = StateNotifierProvider<ModelNotifier, ModelState>((ref) {
 
 /// Currently selected model
 final selectedModelProvider = Provider<String>((ref) {
-  return ref.watch(modelProvider).selectedModel ?? 'llama3.2';
+  return ref.watch(modelProvider).selectedModel ?? 'gemini-2.0-flash';
 });
 
 /// Available models list

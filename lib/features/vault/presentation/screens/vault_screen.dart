@@ -1,19 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:local_auth/local_auth.dart';
 
+import '../../../../core/theme/app_colors.dart';
 import '../../services/vault_service.dart';
 
-/// Vault screen with PIN/biometric unlock
-class VaultScreen extends StatefulWidget {
+/// Private Space screen - Secure vault with PIN/biometric unlock
+class VaultScreen extends ConsumerStatefulWidget {
   const VaultScreen({super.key});
 
   @override
-  State<VaultScreen> createState() => _VaultScreenState();
+  ConsumerState<VaultScreen> createState() => _VaultScreenState();
 }
 
-class _VaultScreenState extends State<VaultScreen> {
+class _VaultScreenState extends ConsumerState<VaultScreen> {
   final LocalAuthentication _localAuth = LocalAuthentication();
   final _pinController = TextEditingController();
   
@@ -80,7 +83,7 @@ class _VaultScreenState extends State<VaultScreen> {
   Future<void> _unlockWithBiometric() async {
     try {
       final authenticated = await _localAuth.authenticate(
-        localizedReason: 'Unlock your secret vault',
+        localizedReason: 'Unlock your Private Space',
         options: const AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: true,
@@ -116,7 +119,7 @@ class _VaultScreenState extends State<VaultScreen> {
         _status = VaultStatus(enabled: true, unlocked: true, hasPin: true);
       });
     } else {
-      setState(() => _error = 'Failed to setup vault');
+      setState(() => _error = 'Failed to setup Private Space');
     }
     
     setState(() => _isLoading = false);
@@ -131,30 +134,45 @@ class _VaultScreenState extends State<VaultScreen> {
     });
   }
 
-  void _showAddItemDialog() {
+  void _showAddNoteDialog() {
     final titleController = TextEditingController();
     final contentController = TextEditingController();
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add Secret Note'),
+        backgroundColor: AppColors.surfaceDark,
+        title: const Text('Add Private Note', style: TextStyle(color: AppColors.textDark)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: titleController,
-              decoration: const InputDecoration(
-                labelText: 'Title',
-                border: OutlineInputBorder(),
+              style: const TextStyle(color: AppColors.textDark),
+              decoration: InputDecoration(
+                hintText: 'Title',
+                hintStyle: TextStyle(color: AppColors.textMuted),
+                filled: true,
+                fillColor: AppColors.inputBackground,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: contentController,
-              decoration: const InputDecoration(
-                labelText: 'Secret Content',
-                border: OutlineInputBorder(),
+              style: const TextStyle(color: AppColors.textDark),
+              decoration: InputDecoration(
+                hintText: 'Secret content',
+                hintStyle: TextStyle(color: AppColors.textMuted),
+                filled: true,
+                fillColor: AppColors.inputBackground,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
               maxLines: 4,
             ),
@@ -163,9 +181,9 @@ class _VaultScreenState extends State<VaultScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
           ),
-          FilledButton(
+          ElevatedButton(
             onPressed: () async {
               final item = await vaultService.addItem(
                 title: titleController.text,
@@ -176,6 +194,9 @@ class _VaultScreenState extends State<VaultScreen> {
               }
               Navigator.pop(context);
             },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
             child: const Text('Save'),
           ),
         ],
@@ -185,31 +206,41 @@ class _VaultScreenState extends State<VaultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        backgroundColor: AppColors.backgroundDark,
+        body: const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
       );
     }
 
     // Not set up
     if (_status == null || !_status!.enabled) {
-      return _buildSetupScreen(theme);
+      return _buildSetupScreen();
     }
 
     // Locked
     if (!_isUnlocked) {
-      return _buildUnlockScreen(theme);
+      return _buildUnlockScreen();
     }
 
     // Unlocked - show items
-    return _buildVaultScreen(theme);
+    return _buildVaultScreen();
   }
 
-  Widget _buildSetupScreen(ThemeData theme) {
+  Widget _buildSetupScreen() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Secret Vault')),
+      backgroundColor: AppColors.backgroundDark,
+      appBar: AppBar(
+        backgroundColor: AppColors.backgroundDark,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
+          onPressed: () => context.go('/chat'),
+        ),
+        title: const Text('Private Space'),
+        centerTitle: true,
+      ),
       body: Center(
         child: Container(
           padding: const EdgeInsets.all(32),
@@ -217,21 +248,34 @@ class _VaultScreenState extends State<VaultScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.lock_outline,
-                size: 80,
-                color: theme.colorScheme.primary,
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppColors.privateSpace.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.lock_outline,
+                  size: 64,
+                  color: AppColors.privateSpace,
+                ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
               Text(
-                'Create Your Secret Vault',
-                style: theme.textTheme.headlineSmall,
-                textAlign: TextAlign.center,
+                'Create Private Space',
+                style: TextStyle(
+                  color: AppColors.textDark,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 12),
               Text(
-                'Protect your private notes and passwords with a PIN',
-                style: theme.textTheme.bodyMedium,
+                'Protect your private chats and notes with a PIN or biometrics',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 14,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),
@@ -240,17 +284,44 @@ class _VaultScreenState extends State<VaultScreen> {
                 keyboardType: TextInputType.number,
                 obscureText: true,
                 maxLength: 8,
+                style: const TextStyle(color: AppColors.textDark, fontSize: 24, letterSpacing: 8),
+                textAlign: TextAlign.center,
                 decoration: InputDecoration(
-                  labelText: 'Create PIN (4-8 digits)',
-                  border: const OutlineInputBorder(),
+                  hintText: '••••',
+                  hintStyle: TextStyle(color: AppColors.textMuted, letterSpacing: 8),
+                  counterText: '',
+                  filled: true,
+                  fillColor: AppColors.inputBackground,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
                   errorText: _error,
+                  errorStyle: TextStyle(color: AppColors.error),
                 ),
               ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _setupVault,
-                icon: const Icon(Icons.lock),
-                label: const Text('Create Vault'),
+              const SizedBox(height: 8),
+              Text(
+                'Create a 4-8 digit PIN',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _setupVault,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.privateSpace,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Create Private Space',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
               ),
             ],
           ),
@@ -259,9 +330,18 @@ class _VaultScreenState extends State<VaultScreen> {
     );
   }
 
-  Widget _buildUnlockScreen(ThemeData theme) {
+  Widget _buildUnlockScreen() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Secret Vault')),
+      backgroundColor: AppColors.backgroundDark,
+      appBar: AppBar(
+        backgroundColor: AppColors.backgroundDark,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
+          onPressed: () => context.go('/chat'),
+        ),
+        title: const Text('Private Space'),
+        centerTitle: true,
+      ),
       body: Center(
         child: Container(
           padding: const EdgeInsets.all(32),
@@ -269,15 +349,29 @@ class _VaultScreenState extends State<VaultScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.lock,
-                size: 80,
-                color: theme.colorScheme.primary,
-              ).animate(onPlay: (c) => c.repeat()).shimmer(duration: 2.seconds),
-              const SizedBox(height: 24),
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: AppColors.privateSpace.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.lock,
+                  size: 64,
+                  color: AppColors.privateSpace,
+                ),
+              ).animate(onPlay: (c) => c.repeat()).shimmer(
+                duration: 2.seconds,
+                color: AppColors.privateSpace.withValues(alpha: 0.3),
+              ),
+              const SizedBox(height: 32),
               Text(
-                'Unlock Your Vault',
-                style: theme.textTheme.headlineSmall,
+                'Unlock Private Space',
+                style: TextStyle(
+                  color: AppColors.textDark,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 32),
               TextField(
@@ -285,25 +379,69 @@ class _VaultScreenState extends State<VaultScreen> {
                 keyboardType: TextInputType.number,
                 obscureText: true,
                 maxLength: 8,
+                style: const TextStyle(color: AppColors.textDark, fontSize: 24, letterSpacing: 8),
+                textAlign: TextAlign.center,
                 onSubmitted: (_) => _unlockWithPin(),
                 decoration: InputDecoration(
-                  labelText: 'Enter PIN',
-                  border: const OutlineInputBorder(),
+                  hintText: '••••',
+                  hintStyle: TextStyle(color: AppColors.textMuted, letterSpacing: 8),
+                  counterText: '',
+                  filled: true,
+                  fillColor: AppColors.inputBackground,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
                   errorText: _error,
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.arrow_forward),
-                    onPressed: _unlockWithPin,
+                  errorStyle: TextStyle(color: AppColors.error),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _unlockWithPin,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.privateSpace,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Unlock',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
               if (_canUseBiometrics) ...[
                 const SizedBox(height: 24),
-                const Text('or'),
-                const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  onPressed: _unlockWithBiometric,
-                  icon: const Icon(Icons.fingerprint),
-                  label: const Text('Use Biometrics'),
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: AppColors.dividerDark)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text('or', style: TextStyle(color: AppColors.textMuted)),
+                    ),
+                    Expanded(child: Divider(color: AppColors.dividerDark)),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: OutlinedButton.icon(
+                    onPressed: _unlockWithBiometric,
+                    icon: const Icon(Icons.fingerprint, size: 24),
+                    label: const Text('Use Biometrics'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textDark,
+                      side: BorderSide(color: AppColors.inputBorder),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ],
@@ -313,37 +451,56 @@ class _VaultScreenState extends State<VaultScreen> {
     );
   }
 
-  Widget _buildVaultScreen(ThemeData theme) {
+  Widget _buildVaultScreen() {
     return Scaffold(
+      backgroundColor: AppColors.backgroundDark,
       appBar: AppBar(
-        title: const Text('Secret Vault'),
+        backgroundColor: AppColors.backgroundDark,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
+          onPressed: () => context.go('/chat'),
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock, color: AppColors.privateSpace, size: 20),
+            const SizedBox(width: 8),
+            const Text('Private Space'),
+          ],
+        ),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.lock),
+            icon: Icon(Icons.lock_open, color: AppColors.textMuted),
             onPressed: _lockVault,
-            tooltip: 'Lock vault',
+            tooltip: 'Lock',
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddItemDialog,
-        child: const Icon(Icons.add),
+        onPressed: _showAddNoteDialog,
+        backgroundColor: AppColors.privateSpace,
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: _items.isEmpty
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.note_add, size: 64, color: theme.colorScheme.outline),
+                  Icon(Icons.note_add_outlined, size: 64, color: AppColors.textMuted),
                   const SizedBox(height: 16),
                   Text(
-                    'No secrets yet',
-                    style: theme.textTheme.titleMedium,
+                    'No private notes yet',
+                    style: TextStyle(
+                      color: AppColors.textDark,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Tap + to add your first secret',
-                    style: theme.textTheme.bodySmall,
+                    'Tap + to add your first private note',
+                    style: TextStyle(color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -353,28 +510,37 @@ class _VaultScreenState extends State<VaultScreen> {
               itemCount: _items.length,
               itemBuilder: (context, index) {
                 final item = _items[index];
-                return Card(
+                return Container(
                   margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.settingsCard,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: ListTile(
                     leading: Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
+                        color: AppColors.privateSpace.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         item.itemType == 'password' ? Icons.key : Icons.note,
-                        color: theme.colorScheme.primary,
+                        color: AppColors.privateSpace,
+                        size: 20,
                       ),
                     ),
-                    title: Text(item.title),
+                    title: Text(
+                      item.title,
+                      style: const TextStyle(color: AppColors.textDark),
+                    ),
                     subtitle: Text(
                       item.content,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: AppColors.textMuted),
                     ),
                     trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
+                      icon: Icon(Icons.delete_outline, color: AppColors.textMuted),
                       onPressed: () async {
                         final success = await vaultService.deleteItem(item.id);
                         if (success) {
@@ -394,23 +560,33 @@ class _VaultScreenState extends State<VaultScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(item.title),
-        content: SelectableText(item.content),
+        backgroundColor: AppColors.surfaceDark,
+        title: Text(item.title, style: const TextStyle(color: AppColors.textDark)),
+        content: SelectableText(
+          item.content,
+          style: const TextStyle(color: AppColors.textDark),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            child: Text('Close', style: TextStyle(color: AppColors.textMuted)),
           ),
-          TextButton.icon(
+          ElevatedButton.icon(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: item.content));
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Copied to clipboard')),
+                SnackBar(
+                  content: const Text('Copied to clipboard'),
+                  backgroundColor: AppColors.surfaceDarkElevated,
+                ),
               );
             },
-            icon: const Icon(Icons.copy),
+            icon: const Icon(Icons.copy, size: 18),
             label: const Text('Copy'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+            ),
           ),
         ],
       ),
