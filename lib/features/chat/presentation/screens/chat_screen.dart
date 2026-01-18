@@ -62,6 +62,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.addListener(() => setState(() {}));
   }
 
+  bool _isVoiceConverted = false;
+
   void _onScroll() {
     if (_scrollController.hasClients) {
       final position = _scrollController.position;
@@ -93,6 +95,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final content = text ?? _messageController.text.trim();
     if (content.isEmpty) return;
     
+    setState(() => _isVoiceConverted = false);
     ref.read(chatProvider.notifier).sendMessage(content);
     _messageController.clear();
     _scrollToBottom();
@@ -115,25 +118,73 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final currentState = ref.read(voiceInputProvider).state;
     
     if (currentState == VoiceInputState.idle) {
+      setState(() => _isVoiceConverted = false);
       await voiceNotifier.startRecording();
     } else if (currentState == VoiceInputState.listening) {
-      final audioPath = await voiceNotifier.stopRecording();
-      if (audioPath != null) {
-        await Future.delayed(const Duration(seconds: 1));
-        voiceNotifier.setTranscription('Voice message');
-      }
+      // Manual stop -> Stop streaming.
+      // The text is already updated in real-time via the listener.
+      await voiceNotifier.stopRecording();
+    }
+  }
+
+  void _handleVoiceStopAndSend() async {
+    final voiceNotifier = ref.read(voiceInputProvider.notifier);
+    
+    // Stop recording if active
+    if (ref.read(voiceInputProvider).state == VoiceInputState.listening) {
+      await voiceNotifier.stopRecording();
+    }
+    
+    // Send immediately if we have text
+    if (_messageController.text.isNotEmpty) {
+      _sendMessage();
     }
   }
 
   void _showAttachmentOptions() {
     showAttachmentSheet(
       context,
-      onCamera: () {},
-      onPhotos: () {},
-      onFiles: () {},
-      onCreateImage: () => _sendMessage('Create an image of'),
-      onDeepResearch: () => _sendMessage('Deep research on'),
-      onWebSearch: () => _sendMessage('Search the web for'),
+      onCamera: () {
+        // TODO: Implement camera capture
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera coming soon'), behavior: SnackBarBehavior.floating),
+        );
+      },
+      onPhotos: () {
+        // TODO: Implement photo picker
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo picker coming soon'), behavior: SnackBarBehavior.floating),
+        );
+      },
+      onFiles: () {
+        // TODO: Implement file picker
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File picker coming soon'), behavior: SnackBarBehavior.floating),
+        );
+      },
+      onCreateImage: () {
+        _messageController.text = 'Create an image of ';
+        _messageController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _messageController.text.length),
+        );
+        _focusNode.requestFocus();
+      },
+      onDeepResearch: () {
+        ref.read(chatProvider.notifier).setResearchMode('deep_research');
+        _messageController.text = '';
+        _focusNode.requestFocus();
+        // Snackbar removed - research mode shown via pill indicator
+      },
+      onShoppingResearch: () {
+        ref.read(chatProvider.notifier).setResearchMode('shopping');
+        _messageController.text = '';
+        _focusNode.requestFocus();
+      },
+      onWebSearch: () {
+        ref.read(chatProvider.notifier).setResearchMode('web_search');
+        _messageController.text = '';
+        _focusNode.requestFocus();
+      },
     );
   }
 
@@ -163,14 +214,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (mounted && group.link != null) {
           showGroupLinkDialog(context, group.link!);
         }
-      },
-      onEditProfile: () {
-        ProfileEditModal.show(
-          context,
-          initialName: userName,
-          initialUsername: user?.email?.split('@').first ?? '',
-          initials: userInitials,
-        );
       },
     );
   }
@@ -211,10 +254,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
     
     ref.listen(voiceInputProvider, (previous, current) {
-      if (current.transcribedText != null && 
-          current.transcribedText != previous?.transcribedText) {
-        _messageController.text = current.transcribedText!;
-        ref.read(voiceInputProvider.notifier).reset();
+      // 1. Handle Partial & Final Text Updates
+      if (current.transcribedText != null) {
+        // Update text field in real-time
+        if (_messageController.text != current.transcribedText) {
+          _messageController.text = current.transcribedText!;
+           // Move cursor to end
+          _messageController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _messageController.text.length),
+          );
+        }
+      }
+
+      // 2. Handle Auto-Submit (Final State)
+      // If state transitions to 'transcribing' (which we mapped to 'Final' in provider), auto-send
+      if (current.state == VoiceInputState.transcribing && 
+          previous?.state != VoiceInputState.transcribing) {
+           // Wait a brief moment to ensure text is set, then send
+           if (_messageController.text.isNotEmpty) {
+             _sendMessage();
+             // Reset voice state after send
+             ref.read(voiceInputProvider.notifier).reset();
+           }
       }
     });
 
@@ -280,6 +341,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 );
                               },
                             ),
+                            // ChatGPT-style headline cards (scraped sources with images)
+                            Consumer(
+                              builder: (context, ref, _) {
+                                final headlines = ref.watch(chatProvider).headlines;
+                                if (headlines.isEmpty) return const SizedBox.shrink();
+                                
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: HeadlineCards(
+                                    headlines: headlines.map((h) => HeadlineData(
+                                      title: h['title']?.toString() ?? '',
+                                      source: h['source']?.toString() ?? h['domain']?.toString() ?? '',
+                                      url: h['url']?.toString(),
+                                      imageUrl: h['image_url']?.toString(),
+                                      sourceIconUrl: h['favicon_url']?.toString(),
+                                    )).toList(),
+                                    onTap: (headline) {
+                                      // TODO: Open URL in browser
+                                      if (headline.url != null) {
+                                        // Open URL
+                                      }
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
                             // Message list or empty state
                             Expanded(
                               child: messages.isEmpty
@@ -331,18 +418,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ],
             ),
             
-            // Voice recording overlay
-            if (voiceState != VoiceInputState.idle)
-              VoiceRecordingOverlay(
-                onCancel: () => ref.read(voiceInputProvider.notifier).cancelRecording(),
-                onStop: () async {
-                  final audioPath = await ref.read(voiceInputProvider.notifier).stopRecording();
-                  if (audioPath != null) {
-                    await Future.delayed(const Duration(seconds: 1));
-                    ref.read(voiceInputProvider.notifier).setTranscription('Voice message');
-                  }
-                },
-              ),
+            // Voice recording overlay removed (using inline input box instead)
           ],
         ),
       ),
@@ -430,7 +506,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.35),
                     child: Text(
-                      isEmptyChat ? 'Aris AI' : chatTitle,
+                      isGroupChat ? chatTitle : 'Aris AI',
                       style: const TextStyle(
                         color: AppColors.textPrimary,
                         fontSize: 14,
@@ -439,7 +515,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (isEmptyChat) ...[
+                  if (!isGroupChat) ...[
                     const SizedBox(width: 4),
                     HugeIcon(
                       icon: HugeIcons.strokeRoundedArrowDown01,
@@ -1120,19 +1196,59 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             
             const SizedBox(height: 32),
             
-            ExpandedSuggestionChips(
-              onSuggestionTap: (suggestion) {
-                // Populate input box with suggestion prefix instead of sending
-                _messageController.text = '$suggestion ';
-                _messageController.selection = TextSelection.fromPosition(
-                  TextPosition(offset: _messageController.text.length),
-                );
-                _focusNode.requestFocus();
-              },
-              onCategorySelected: (category) {
-                setState(() => _selectedSuggestionCategory = category);
-              },
-            ),
+            if (ref.watch(chatProvider).researchMode != null) ...[
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'Trending nearby',
+                    style: TextStyle(
+                      color: AppColors.textDark,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  'Latest Tech News',
+                  'Stock Market Today',
+                  'New Movie Releases',
+                  'Premier League Results',
+                  'Crypto Prices',
+                  'Climate Change Updates',
+                  'Global Economic Trends',
+                  'SpaceX Launch Schedule'
+                ].map((topic) => ActionChip(
+                  label: Text(topic),
+                  onPressed: () {
+                    _messageController.text = topic;
+                    _sendMessage();
+                  },
+                  backgroundColor: AppColors.surfaceLight,
+                  labelStyle: const TextStyle(color: AppColors.textDark),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                )).toList(),
+              ),
+            ] else
+              ExpandedSuggestionChips(
+                onSuggestionTap: (suggestion) {
+                  // Populate input box with suggestion prefix instead of sending
+                  _messageController.text = '$suggestion ';
+                  _messageController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _messageController.text.length),
+                  );
+                  _focusNode.requestFocus();
+                },
+                onCategorySelected: (category) {
+                  setState(() => _selectedSuggestionCategory = category);
+                },
+              ),
             
             const SizedBox(height: 60),
           ],
@@ -1337,8 +1453,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ).animate().fadeIn(duration: 200.ms);
   }
 
+  Future<void> _handleVoiceCancel() async {
+    await ref.read(voiceInputProvider.notifier).cancelRecording();
+  }
+
   Widget _buildInputArea(BuildContext context, bool isStreaming, VoiceInputState voiceState) {
     final isListening = voiceState == VoiceInputState.listening;
+    
+    final chatState = ref.watch(chatProvider);
     
     return ExpandableInputBox(
       controller: _messageController,
@@ -1346,11 +1468,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       hintText: 'Message Aris...',
       isStreaming: isStreaming,
       isVoiceListening: isListening,
+      isVoiceConvertedText: _isVoiceConverted,
       attachedImages: const [], // TODO: Add image attachment state
+      researchMode: chatState.researchMode,
       onSend: _sendMessage,
       onAttachmentTap: _showAttachmentOptions,
       onVoiceTap: _handleVoiceTap,
+      onVoiceStopAndSend: _handleVoiceStopAndSend,
+      onVoiceCancel: _handleVoiceCancel,
       onCancelStream: () => ref.read(chatProvider.notifier).cancelStream(),
+      onClearResearchMode: () => ref.read(chatProvider.notifier).setResearchMode(null),
       onRemoveImage: (file) {
         // TODO: Implement image removal
       },

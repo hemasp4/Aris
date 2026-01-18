@@ -176,17 +176,19 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Message content - full width
-              messageContent,
+              // Message content - only show if has content
+              if (widget.message.content.isNotEmpty)
+                messageContent,
               
-              // Streaming indicator
+              // Streaming indicator - show only while streaming
               if (widget.message.isStreaming) ...[
-                const SizedBox(height: 8),
+                if (widget.message.content.isNotEmpty)
+                  const SizedBox(height: 4),
                 _buildStreamingIndicator(),
               ],
               
-              // Action bar (shown after message, like ChatGPT)
-              if (!widget.message.isStreaming) ...[
+              // Action bar (shown after message complete, like ChatGPT)
+              if (!widget.message.isStreaming && widget.message.content.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 _buildAIActionBar(context, isDark),
               ],

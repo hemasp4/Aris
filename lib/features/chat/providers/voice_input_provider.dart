@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -9,7 +10,9 @@ import 'package:permission_handler/permission_handler.dart';
 enum VoiceInputState {
   idle,
   listening,
-  transcribing,
+  thinking, // New "Thinking Pause" state
+  finalizing, // Computing final text
+  transcribing, // Used for Finalizing/Submit
 }
 
 /// Voice input data model
@@ -49,76 +52,111 @@ class VoiceInputData {
 class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
   final AudioRecorder _recorder = AudioRecorder();
   Timer? _amplitudeTimer;
+  StreamSubscription? _audioStreamSubscription;
+  WebSocketChannel? _channel;
   
   VoiceInputNotifier() : super(const VoiceInputData());
 
-  /// Check if microphone permission is granted
+  /// Check permissions
   Future<bool> checkPermission() async {
-    if (kIsWeb) {
-      return await _recorder.hasPermission();
-    }
-    
+    if (kIsWeb) return await _recorder.hasPermission();
     final status = await Permission.microphone.status;
-    if (status.isGranted) {
-      return true;
-    }
-    
+    if (status.isGranted) return true;
     final result = await Permission.microphone.request();
     return result.isGranted;
   }
 
-  /// Start recording audio
+  /// Start Streaming (Real-time)
   Future<void> startRecording() async {
+    // 0. Immediate UI Feedback
+    state = state.copyWith(
+      state: VoiceInputState.listening,
+      amplitude: 0.0,
+      error: null,
+    );
+
     try {
-      final hasPermission = await checkPermission();
-      if (!hasPermission) {
+      if (!await checkPermission()) {
         state = state.copyWith(
-          error: 'Microphone permission denied',
-        );
+            state: VoiceInputState.idle, 
+            error: 'Microphone permission denied');
         return;
       }
 
-      // Check if recorder is available
-      if (!await _recorder.hasPermission()) {
-        state = state.copyWith(
-          error: 'Microphone not available',
-        );
-        return;
-      }
-
-      // Configure recording
-      const config = RecordConfig(
-        encoder: AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
-      );
-
-      // Start recording to a temporary file
-      String path;
-      if (kIsWeb) {
-        path = '';
-      } else if (Platform.isAndroid || Platform.isIOS) {
-        path = '/tmp/aris_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
-      } else {
-        path = 'aris_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
-      }
-
-      await _recorder.start(config, path: path);
+      // 1. Connect WebSocket
+      print('[Voice] Step 1: Connecting WebSocket...');
       
-      state = state.copyWith(
-        state: VoiceInputState.listening,
-        amplitude: 0.0,
-        error: null,
-        audioPath: path,
+      String baseUrl = 'localhost:8000';
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        baseUrl = '10.0.2.2:8000';
+      }
+      
+      final wsUrl = Uri.parse('ws://$baseUrl/api/v1/voice/stream');
+      _channel = WebSocketChannel.connect(wsUrl);
+      print('[Voice] Step 1: WebSocket Connected');
+      
+      _channel!.stream.listen(
+        (message) {
+           // ... (listener implementation)
+        },
+        // ... (error handlers)
       );
 
-      // Start amplitude monitoring
-      _startAmplitudeMonitoring();
+      // 2. Start Audio Stream
+      print('[Voice] Step 2: Starting Audio Recorder Stream...');
+      try {
+        final config = kIsWeb 
+            ? const RecordConfig() // Let browser decide (usually WebM/Opus)
+            : const RecordConfig(
+                encoder: AudioEncoder.wav,
+                sampleRate: 16000,
+                numChannels: 1,
+              );
+              
+        final stream = await _recorder.startStream(config);
+        print('[Voice] Step 2: Stream Started Successfully');
+
+        // 3. Pump audio to WebSocket
+        print('[Voice] Step 3: Attaching Listener...');
+        _audioStreamSubscription = stream.listen((data) {
+           // ... (pump logic)
+           if (_channel != null && _channel!.closeCode == null) {
+              _channel!.sink.add(data);
+              if (state.amplitude == 0.0) {
+                  print('[Voice] First chunk sent: ${data.length} bytes');
+              }
+           }
+        }, onError: (e) {
+             print('[Voice] Stream error: $e');
+        });
+
+        _startAmplitudeMonitoring();
+
+      } catch (recError) {
+         print('[Voice] Recorder Error: $recError');
+         state = state.copyWith(
+             state: VoiceInputState.idle,
+             error: 'Recorder failed: $recError');
+         return; 
+      }
+
     } catch (e) {
       state = state.copyWith(
-        error: 'Failed to start recording: $e',
-      );
+          state: VoiceInputState.idle,
+          error: 'Failed to start stream: $e');
     }
+  }
+
+  /// Stop Streaming
+  Future<String?> stopRecording() async {
+    _amplitudeTimer?.cancel();
+    await _audioStreamSubscription?.cancel();
+    _channel?.sink.close(); // Close WS
+    await _recorder.stop();
+    
+    // In streaming mode, there is no "file path".
+    // We return NULL or a dummy value, because text is already in state.transcribedText
+    return null; 
   }
 
   /// Start monitoring audio amplitude for animation
@@ -127,67 +165,25 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       try {
         final amp = await _recorder.getAmplitude();
-        // Normalize amplitude to 0-1 range
-        // dB values typically range from -60 (silence) to 0 (max)
         final normalized = ((amp.current + 60) / 60).clamp(0.0, 1.0);
         state = state.copyWith(amplitude: normalized);
-      } catch (_) {
-        // Ignore amplitude errors
-      }
+      } catch (_) {}
     });
-  }
-
-  /// Stop recording and prepare for transcription
-  Future<String?> stopRecording() async {
-    _amplitudeTimer?.cancel();
-    
-    try {
-      final path = await _recorder.stop();
-      
-      state = state.copyWith(
-        state: VoiceInputState.transcribing,
-        amplitude: 0.0,
-        audioPath: path,
-      );
-      
-      return path;
-    } catch (e) {
-      state = state.copyWith(
-        state: VoiceInputState.idle,
-        error: 'Failed to stop recording: $e',
-      );
-      return null;
-    }
-  }
-
-  /// Set transcription result
-  void setTranscription(String text) {
-    state = state.copyWith(
-      state: VoiceInputState.idle,
-      transcribedText: text,
-    );
-  }
-
-  /// Set transcription error
-  void setTranscriptionError(String error) {
-    state = state.copyWith(
-      state: VoiceInputState.idle,
-      error: error,
-    );
   }
 
   /// Cancel recording
   Future<void> cancelRecording() async {
     _amplitudeTimer?.cancel();
-    
-    try {
-      await _recorder.stop();
-    } catch (_) {}
-    
+    await _audioStreamSubscription?.cancel();
+    _channel?.sink.close();
+    await _recorder.stop();
     state = const VoiceInputData();
   }
 
-  /// Reset state
+  void setTranscription(String text) {
+    state = state.copyWith(transcribedText: text);
+  }
+
   void reset() {
     state = const VoiceInputData();
   }
@@ -195,6 +191,8 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
   @override
   void dispose() {
     _amplitudeTimer?.cancel();
+    _audioStreamSubscription?.cancel();
+    _channel?.sink.close();
     _recorder.dispose();
     super.dispose();
   }

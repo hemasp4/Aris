@@ -15,6 +15,7 @@ class AttachmentBottomSheet extends ConsumerWidget {
   final VoidCallback? onFiles;
   final VoidCallback? onCreateImage;
   final VoidCallback? onDeepResearch;
+  final VoidCallback? onShoppingResearch;
   final VoidCallback? onWebSearch;
 
   const AttachmentBottomSheet({
@@ -24,6 +25,7 @@ class AttachmentBottomSheet extends ConsumerWidget {
     this.onFiles,
     this.onCreateImage,
     this.onDeepResearch,
+    this.onShoppingResearch,
     this.onWebSearch,
   });
 
@@ -130,6 +132,7 @@ class AttachmentBottomSheet extends ConsumerWidget {
             subtitle: 'Get an in-depth guide',
             onTap: () {
               Navigator.pop(context);
+              onShoppingResearch?.call();
             },
           ),
           _buildFeatureTile(
@@ -283,6 +286,7 @@ void showAttachmentSheet(
   VoidCallback? onFiles,
   VoidCallback? onCreateImage,
   VoidCallback? onDeepResearch,
+  VoidCallback? onShoppingResearch,
   VoidCallback? onWebSearch,
 }) {
   showModalBottomSheet(
@@ -295,6 +299,7 @@ void showAttachmentSheet(
       onFiles: onFiles,
       onCreateImage: onCreateImage,
       onDeepResearch: onDeepResearch,
+      onShoppingResearch: onShoppingResearch,
       onWebSearch: onWebSearch,
     ),
   );

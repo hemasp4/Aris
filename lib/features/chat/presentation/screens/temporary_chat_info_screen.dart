@@ -54,7 +54,7 @@ class TemporaryChatInfoScreen extends StatelessWidget {
                             isDark: isDark,
                             icon: HugeIcons.strokeRoundedFile02,
                             title: 'No memory',
-                            description: 'ChatGPT won\'t use or create memories in Temporary Chats. If you have Custom Instructions, they\'ll still be followed.',
+                            description: 'Aris won\'t use or create memories in Temporary Chats. If you have Custom Instructions, they\'ll still be followed.',
                           ),
                           const SizedBox(height: 16),
                           _buildInfoCard(
@@ -74,7 +74,7 @@ class TemporaryChatInfoScreen extends StatelessWidget {
                           _buildInfoListItem(
                             icon: HugeIcons.strokeRoundedFile02,
                             title: 'No memory',
-                            description: 'ChatGPT won\'t use or create memories in Temporary Chats. If you have Custom Instructions, they\'ll still be followed.',
+                            description: 'Aris won\'t use or create memories in Temporary Chats. If you have Custom Instructions, they\'ll still be followed.',
                           ),
                           const Divider(height: 32),
                           _buildInfoListItem(

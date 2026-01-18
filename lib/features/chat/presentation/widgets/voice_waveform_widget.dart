@@ -65,12 +65,13 @@ class _VoiceWaveformBarsState extends ConsumerState<VoiceWaveformBars>
         final phase = (_controller.value * 2 * math.pi) + (i * 0.5);
         final waveOffset = math.sin(phase) * 0.15;
         
-        // Base height + amplitude contribution + wave motion
-        final targetHeight = 0.3 + (_lastAmplitude * 0.6) + waveOffset;
+        // Base height (0.15 = dots) + amplitude + dynamic wave motion
+        // Wave motion scales with amplitude so it's calm when silent
+        final targetHeight = 0.15 + (_lastAmplitude * 0.8) + (waveOffset * (_lastAmplitude + 0.2));
         
         // Smooth interpolation for each bar
         _barHeights[i] = _barHeights[i] + (targetHeight - _barHeights[i]) * 0.2;
-        _barHeights[i] = _barHeights[i].clamp(0.2, 1.0);
+        _barHeights[i] = _barHeights[i].clamp(0.1, 1.0);
       }
     });
   }
@@ -99,7 +100,9 @@ class _VoiceWaveformBarsState extends ConsumerState<VoiceWaveformBars>
               width: 3,
               height: widget.height * _barHeights[index],
               decoration: BoxDecoration(
-                color: AppColors.waveformPurple,
+                color: Theme.of(context).brightness == Brightness.dark 
+                    ? Colors.white 
+                    : Colors.black,
                 borderRadius: BorderRadius.circular(1.5),
               ),
             ),

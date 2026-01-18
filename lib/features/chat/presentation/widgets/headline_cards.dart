@@ -21,41 +21,51 @@ class HeadlineData {
   });
 }
 
-/// ChatGPT-style horizontal scrolling headline cards
-/// Shows scraped news articles with images, source, title, and date
+/// ChatGPT-style responsive grid headline cards
+/// Shows 2 columns on mobile, 3 on tablet/desktop
+/// Cards display: Image → Favicon+Source → Title → Date
 class HeadlineCards extends StatelessWidget {
   final List<HeadlineData> headlines;
   final Function(HeadlineData)? onTap;
+  final int maxCards; // Limit displayed cards
 
   const HeadlineCards({
     super.key,
     required this.headlines,
     this.onTap,
+    this.maxCards = 6, // Default show 6 cards
   });
 
   @override
   Widget build(BuildContext context) {
     if (headlines.isEmpty) return const SizedBox.shrink();
 
-    return SizedBox(
-      height: 180,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: headlines.length,
-        itemBuilder: (context, index) {
-          final headline = headlines[index];
-          return Padding(
-            padding: EdgeInsets.only(
-              right: index < headlines.length - 1 ? 12 : 0,
-            ),
-            child: _HeadlineCard(
-              headline: headline,
-              onTap: () => onTap?.call(headline),
-            ),
-          );
-        },
-      ),
+    // Limit to maxCards
+    final displayHeadlines = headlines.take(maxCards).toList();
+    
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Responsive columns: 2 on mobile (<600), 3 on tablet/desktop
+        final columns = constraints.maxWidth < 600 ? 2 : 3;
+        final cardWidth = (constraints.maxWidth - (columns - 1) * 12 - 32) / columns;
+        final cardHeight = cardWidth * 1.1; // Aspect ratio ~1.1
+        
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: displayHeadlines.map((headline) => SizedBox(
+              width: cardWidth,
+              height: cardHeight,
+              child: _HeadlineCard(
+                headline: headline,
+                onTap: () => onTap?.call(headline),
+              ),
+            )).toList(),
+          ),
+        );
+      },
     );
   }
 }
@@ -76,7 +86,7 @@ class _HeadlineCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 200,
+        // No fixed width - parent controls size via SizedBox
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -86,48 +96,53 @@ class _HeadlineCard extends StatelessWidget {
           ),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Image
-            if (headline.imageUrl != null)
-              SizedBox(
-                height: 100,
-                width: double.infinity,
-                child: CachedNetworkImage(
-                  imageUrl: headline.imageUrl!,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Image takes ~55% of card height
+            final imageHeight = constraints.maxHeight * 0.55;
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Image
+                if (headline.imageUrl != null)
+                  SizedBox(
+                    height: imageHeight,
+                    width: double.infinity,
+                    child: CachedNetworkImage(
+                      imageUrl: headline.imageUrl!,
+                      fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
+                        child: const Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
+                        child: Icon(
+                          Icons.image_not_supported_outlined,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    height: imageHeight,
                     color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                    child: const Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    child: Center(
+                      child: Icon(
+                        Icons.article_outlined,
+                        color: Colors.grey[600],
+                        size: 28,
                       ),
                     ),
                   ),
-                  errorWidget: (context, url, error) => Container(
-                    color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                    child: Icon(
-                      Icons.image_not_supported_outlined,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ),
-              )
-            else
-              Container(
-                height: 100,
-                color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                child: Center(
-                  child: Icon(
-                    Icons.article_outlined,
-                    color: Colors.grey[600],
-                    size: 32,
-                  ),
-                ),
-              ),
 
             // Content
             Expanded(
@@ -196,7 +211,9 @@ class _HeadlineCard extends StatelessWidget {
                 ),
               ),
             ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );

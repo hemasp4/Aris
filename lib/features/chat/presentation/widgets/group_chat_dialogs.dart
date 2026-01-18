@@ -187,12 +187,13 @@ Future<void> showGroupLinkDialog(BuildContext context, String link) async {
               ),
               const SizedBox(height: 20),
               
-              // Responsive button layout
-              if (isSmallScreen)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    ElevatedButton(
+              // Responsive button layout - always full width for consistency
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: link));
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -208,70 +209,43 @@ Future<void> showGroupLinkDialog(BuildContext context, String link) async {
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(26),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        'Copy link',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: const Text('Copy link'),
                     ),
-                    const SizedBox(height: 8),
-                    TextButton(
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    height: 52,
+                    child: TextButton(
                       onPressed: () => Navigator.pop(context),
                       style: TextButton.styleFrom(
                         backgroundColor: AppColors.surfaceDarkElevated,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(24),
+                          borderRadius: BorderRadius.circular(26),
                         ),
                       ),
                       child: const Text(
                         'Cancel',
-                        style: TextStyle(color: AppColors.textDark),
-                      ),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: TextButton.styleFrom(
-                        backgroundColor: AppColors.surfaceDarkElevated,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                        style: TextStyle(
+                          color: AppColors.textDark,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(color: AppColors.textDark, fontSize: 13),
-                      ),
                     ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: link));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Link copied to clipboard'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                        Navigator.pop(context);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                      child: const Text('Copy link', style: TextStyle(fontSize: 13)),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -541,6 +515,9 @@ class _TypingIndicatorState extends State<TypingIndicator>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dotColor = isDark ? Colors.white : const Color(0xFF0EA5E9); // Blue for light, white for dark
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -579,7 +556,7 @@ class _TypingIndicatorState extends State<TypingIndicator>
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: AppColors.secondaryText.withValues(alpha: opacity),
+                        color: dotColor.withValues(alpha: opacity),
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -593,7 +570,7 @@ class _TypingIndicatorState extends State<TypingIndicator>
           Text(
             '${widget.userName} is typing',
             style: TextStyle(
-              color: AppColors.secondaryText,
+              color: isDark ? Colors.white70 : Colors.grey[600],
               fontSize: 12,
               fontStyle: FontStyle.italic,
             ),

@@ -88,7 +88,7 @@ class GroupOptionsMenu extends StatelessWidget {
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedSettings02,
-          label: 'Customize ChatGPT',
+          label: 'Customize Aris',
           onTap: onCustomize,
           isDark: isDark,
         ),
