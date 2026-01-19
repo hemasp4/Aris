@@ -114,7 +114,7 @@ class AboutScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Aris AI',
+                    'Aris',
                     style: GoogleFonts.inter(
                       color: AppColors.textPrimary,
                       fontSize: 20,

@@ -1,6 +1,4 @@
-import 'package:dio/dio.dart';
 import '../../../core/services/dio_client.dart';
-import '../../../core/constants/api_constants.dart';
 
 /// Vault service for secure storage operations
 class VaultService {

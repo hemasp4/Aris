@@ -71,7 +71,7 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
     TextScaler textScaler,
     double basePadding,
   ) {
-    final fontSize = 15.0 * textScaler.scale(1.0).clamp(1.0, 1.3);
+    final fontSize = 15.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
     
     return GestureDetector(
       onLongPress: () => _showLongPressMenu(context, true),
@@ -137,7 +137,7 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
     double basePadding,
     dynamic settings,
   ) {
-    final fontSize = 15.0 * textScaler.scale(1.0).clamp(1.0, 1.3);
+    final fontSize = 15.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
     
     // Build message content with fallback
     Widget messageContent;

@@ -576,7 +576,7 @@ class _PersonalizationScreenState extends ConsumerState<PersonalizationScreen> {
         Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: AppColors.primary,
+          activeThumbColor: AppColors.primary,
           activeTrackColor: AppColors.primary.withValues(alpha: 0.5),
           inactiveThumbColor: AppColors.textMuted,
           inactiveTrackColor: AppColors.toggleTrackOff,

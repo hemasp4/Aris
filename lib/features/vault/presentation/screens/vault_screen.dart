@@ -192,7 +192,9 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
               if (item != null) {
                 setState(() => _items.insert(0, item));
               }
-              Navigator.pop(context);
+              if (context.mounted) {
+                Navigator.pop(context);
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,

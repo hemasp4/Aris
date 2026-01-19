@@ -28,6 +28,7 @@ class GroupOptionsMenu extends StatelessWidget {
 
   static void show(BuildContext context, {
     required Offset position,
+    required String groupTitle, // Added parameter
     VoidCallback? onViewMembers,
     VoidCallback? onAddMembers,
     VoidCallback? onManageLink,
@@ -39,6 +40,11 @@ class GroupOptionsMenu extends StatelessWidget {
     VoidCallback? onDelete,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    // Responsive font scaling
+    final textScaler = MediaQuery.textScalerOf(context);
+    final scaledHeaderSize = 14.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
+    final scaledItemSize = 16.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
     
     showMenu<void>(
       context: context,
@@ -52,9 +58,9 @@ class GroupOptionsMenu extends StatelessWidget {
           enabled: false,
           height: 32,
           child: Text(
-            'New group chat',
+            groupTitle,
             style: TextStyle(
-              fontSize: 14,
+              fontSize: scaledHeaderSize,
               fontWeight: FontWeight.w600,
               color: Colors.grey[600],
             ),
@@ -63,40 +69,46 @@ class GroupOptionsMenu extends StatelessWidget {
         const PopupMenuDivider(),
         // Normal items
         _buildMenuItem(
-          icon: HugeIcons.strokeRoundedUserGroup,
+          icon: HugeIcons.strokeRoundedUserGroup, // Updated
           label: 'View members',
           onTap: onViewMembers,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedUserAdd01,
           label: 'Add members',
           onTap: onAddMembers,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedLink01,
           label: 'Manage link',
           onTap: onManageLink,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedEdit02,
           label: 'Rename group',
           onTap: onRename,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedSettings02,
           label: 'Customize Aris',
           onTap: onCustomize,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedNotificationOff01,
           label: 'Mute notifications',
           onTap: onMute,
           isDark: isDark,
+          fontSize: scaledItemSize,
         ),
         const PopupMenuDivider(),
         // Destructive items (red)
@@ -106,6 +118,7 @@ class GroupOptionsMenu extends StatelessWidget {
           onTap: onReport,
           isDark: isDark,
           isDestructive: true,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
           icon: HugeIcons.strokeRoundedLogout01,
@@ -113,13 +126,15 @@ class GroupOptionsMenu extends StatelessWidget {
           onTap: onLeave,
           isDark: isDark,
           isDestructive: true,
+          fontSize: scaledItemSize,
         ),
         _buildMenuItem(
-          icon: HugeIcons.strokeRoundedDelete02,
+          icon: HugeIcons.strokeRoundedDelete01,
           label: 'Delete group',
           onTap: onDelete,
           isDark: isDark,
           isDestructive: true,
+          fontSize: scaledItemSize,
         ),
       ],
     );
@@ -130,6 +145,7 @@ class GroupOptionsMenu extends StatelessWidget {
     required String label,
     required VoidCallback? onTap,
     required bool isDark,
+    required double fontSize,
     bool isDestructive = false,
   }) {
     final color = isDestructive 
@@ -150,7 +166,7 @@ class GroupOptionsMenu extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              fontSize: 16,
+              fontSize: fontSize,
               color: color,
             ),
           ),

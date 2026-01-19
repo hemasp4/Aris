@@ -8,6 +8,7 @@ import '../../../../core/services/auth_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../widgets/profile_edit_modal.dart';
 
 /// ChatGPT-exact settings screen matching reference images
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -327,59 +328,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _showEditProfileDialog(User? user) {
-    final nameController = TextEditingController(text: user?.username ?? '');
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surfaceDark,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Edit Profile', style: GoogleFonts.inter(color: AppColors.primaryText)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: const BoxDecoration(
-                color: AppColors.avatarOrange,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  user?.username.substring(0, 2).toUpperCase() ?? 'U',
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: nameController,
-              style: GoogleFonts.inter(color: AppColors.primaryText),
-              decoration: InputDecoration(
-                labelText: 'Display name',
-                labelStyle: GoogleFonts.inter(color: AppColors.secondaryText),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.inter()),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: Text('Save', style: GoogleFonts.inter()),
-          ),
-        ],
-      ),
+    ProfileEditModal.show(
+      context,
+      name: user?.username,
+      email: user?.email,
     );
   }
 
@@ -454,7 +406,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _showLogoutDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.surfaceDark,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Log out', style: GoogleFonts.inter(color: AppColors.primaryText)),
@@ -464,12 +416,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('Cancel', style: GoogleFonts.inter()),
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               await ref.read(authProvider.notifier).logout();
               if (mounted) {
                 context.go('/login');

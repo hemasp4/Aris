@@ -5,6 +5,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../../core/services/web_audio_recorder_stub.dart' 
+    if (dart.library.html) '../../../core/services/web_audio_recorder.dart';
 
 /// Voice input state enum
 enum VoiceInputState {
@@ -50,7 +52,9 @@ class VoiceInputData {
 
 /// Voice input notifier for managing recording state
 class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
-  final AudioRecorder _recorder = AudioRecorder();
+  final AudioRecorder _mobileRecorder = AudioRecorder();
+  final WebAudioRecorder _webRecorder = WebAudioRecorder();
+  
   Timer? _amplitudeTimer;
   StreamSubscription? _audioStreamSubscription;
   WebSocketChannel? _channel;
@@ -59,7 +63,9 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
 
   /// Check permissions
   Future<bool> checkPermission() async {
-    if (kIsWeb) return await _recorder.hasPermission();
+    if (kIsWeb) return await _webRecorder.hasPermission();
+    
+    // Mobile logic
     final status = await Permission.microphone.status;
     if (status.isGranted) return true;
     final result = await Permission.microphone.request();
@@ -84,7 +90,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
       }
 
       // 1. Connect WebSocket
-      print('[Voice] Step 1: Connecting WebSocket...');
+      // print('[Voice] Step 1: Connecting WebSocket...');
       
       String baseUrl = 'localhost:8000';
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
@@ -93,47 +99,55 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
       
       final wsUrl = Uri.parse('ws://$baseUrl/api/v1/voice/stream');
       _channel = WebSocketChannel.connect(wsUrl);
-      print('[Voice] Step 1: WebSocket Connected');
+      // print('[Voice] Step 1: WebSocket Connected');
       
       _channel!.stream.listen(
         (message) {
-           // ... (listener implementation)
+           final response = jsonDecode(message);
+           if (response['type'] == 'transcription') {
+             setTranscription(response['text']);
+           }
         },
-        // ... (error handlers)
+        onError: (error) {
+          // print('[Voice] WS Error: $error');
+        },
       );
 
       // 2. Start Audio Stream
-      print('[Voice] Step 2: Starting Audio Recorder Stream...');
+      // print('[Voice] Step 2: Starting Audio Recorder Stream...');
       try {
-        final config = kIsWeb 
-            ? const RecordConfig() // Let browser decide (usually WebM/Opus)
-            : const RecordConfig(
-                encoder: AudioEncoder.wav,
-                sampleRate: 16000,
-                numChannels: 1,
-              );
+        Stream<List<int>> stream;
+        
+        if (kIsWeb) {
+           stream = await _webRecorder.startStream();
+        } else {
+           final config = const RecordConfig(
+              encoder: AudioEncoder.wav,
+              sampleRate: 16000,
+              numChannels: 1,
+           );
+           stream = await _mobileRecorder.startStream(config);
+        }
               
-        final stream = await _recorder.startStream(config);
-        print('[Voice] Step 2: Stream Started Successfully');
+        // print('[Voice] Step 2: Stream Started Successfully');
 
         // 3. Pump audio to WebSocket
-        print('[Voice] Step 3: Attaching Listener...');
+        // print('[Voice] Step 3: Attaching Listener...');
         _audioStreamSubscription = stream.listen((data) {
-           // ... (pump logic)
            if (_channel != null && _channel!.closeCode == null) {
               _channel!.sink.add(data);
               if (state.amplitude == 0.0) {
-                  print('[Voice] First chunk sent: ${data.length} bytes');
+                  // print('[Voice] First chunk sent: ${data.length} bytes');
               }
            }
         }, onError: (e) {
-             print('[Voice] Stream error: $e');
+             // print('[Voice] Stream error: $e');
         });
 
         _startAmplitudeMonitoring();
 
       } catch (recError) {
-         print('[Voice] Recorder Error: $recError');
+         // print('[Voice] Recorder Error: $recError');
          state = state.copyWith(
              state: VoiceInputState.idle,
              error: 'Recorder failed: $recError');
@@ -152,10 +166,19 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     _amplitudeTimer?.cancel();
     await _audioStreamSubscription?.cancel();
     _channel?.sink.close(); // Close WS
-    await _recorder.stop();
+    
+    if (kIsWeb) {
+      await _webRecorder.stop();
+    } else {
+      await _mobileRecorder.stop();
+    }
     
     // In streaming mode, there is no "file path".
-    // We return NULL or a dummy value, because text is already in state.transcribedText
+    // Update state to idle but keep the text
+    state = state.copyWith(
+      state: VoiceInputState.idle,
+      amplitude: 0.0,
+    );
     return null; 
   }
 
@@ -164,8 +187,18 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     _amplitudeTimer?.cancel();
     _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       try {
-        final amp = await _recorder.getAmplitude();
-        final normalized = ((amp.current + 60) / 60).clamp(0.0, 1.0);
+        double normalized = 0.0;
+        
+        if (kIsWeb) {
+           // Web Audio Recorder returns 0.0 to 1.0 linear amplitude
+           normalized = await _webRecorder.getAmplitude();
+        } else {
+           final amp = await _mobileRecorder.getAmplitude();
+           final currentAmp = amp.current;
+           // Normalize dB (-60 to 0) to 0.0-1.0
+           normalized = ((currentAmp + 60) / 60).clamp(0.0, 1.0);
+        }
+        
         state = state.copyWith(amplitude: normalized);
       } catch (_) {}
     });
@@ -176,7 +209,13 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     _amplitudeTimer?.cancel();
     await _audioStreamSubscription?.cancel();
     _channel?.sink.close();
-    await _recorder.stop();
+    
+    if (kIsWeb) {
+      await _webRecorder.stop();
+    } else {
+      await _mobileRecorder.stop();
+    }
+    
     state = const VoiceInputData();
   }
 
@@ -193,7 +232,10 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     _amplitudeTimer?.cancel();
     _audioStreamSubscription?.cancel();
     _channel?.sink.close();
-    _recorder.dispose();
+    
+    // No explicit dispose for WebAudioRecorder needed in this simplified version, but good practice
+    _mobileRecorder.dispose();
+    
     super.dispose();
   }
 }

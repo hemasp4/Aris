@@ -246,11 +246,13 @@ class _SuggestionChipState extends State<SuggestionChip>
 
   @override
   Widget build(BuildContext context) {
-    // Use MediaQuery text scale for responsive sizing
+    // Use MediaQuery text scale for responsive sizing with clamping
     final textScaler = MediaQuery.textScalerOf(context);
-    final scaledHeight = textScaler.scale(44);
-    final scaledIconSize = textScaler.scale(20);
-    final scaledFontSize = textScaler.scale(14);
+    final scaleFactor = textScaler.scale(1).clamp(0.8, 1.3);
+    
+    final scaledHeight = 44 * scaleFactor;
+    final scaledIconSize = 20 * scaleFactor;
+    final scaledFontSize = 14 * scaleFactor;
     
     return GestureDetector(
       onTapDown: _handleTapDown,

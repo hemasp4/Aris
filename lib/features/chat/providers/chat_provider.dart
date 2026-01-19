@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -101,6 +100,11 @@ class ChatState {
   final List<String> scrapingSources;
   final List<Map<String, dynamic>> headlines;
   final String? researchMode; // null = normal, 'web_search', 'deep_research', 'shopping'
+  
+  // Quota state for usage limits
+  final bool quotaExceeded;
+  final String? quotaMessage;
+  final int? quotaResetHours;
 
   const ChatState({
     this.sessions = const [],
@@ -115,6 +119,9 @@ class ChatState {
     this.scrapingSources = const [],
     this.headlines = const [],
     this.researchMode,
+    this.quotaExceeded = false,
+    this.quotaMessage,
+    this.quotaResetHours,
   });
 
   ChatState copyWith({
@@ -130,6 +137,9 @@ class ChatState {
     List<String>? scrapingSources,
     List<Map<String, dynamic>>? headlines,
     String? researchMode,
+    bool? quotaExceeded,
+    String? quotaMessage,
+    int? quotaResetHours,
   }) {
     return ChatState(
       sessions: sessions ?? this.sessions,
@@ -144,6 +154,9 @@ class ChatState {
       scrapingSources: scrapingSources ?? this.scrapingSources,
       headlines: headlines ?? this.headlines,
       researchMode: researchMode ?? this.researchMode,
+      quotaExceeded: quotaExceeded ?? this.quotaExceeded,
+      quotaMessage: quotaMessage ?? this.quotaMessage,
+      quotaResetHours: quotaResetHours ?? this.quotaResetHours,
     );
   }
 }
@@ -242,8 +255,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
           isLoading: false,
         );
       }
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        state = state.copyWith(
+          isLoading: false, 
+          error: 'Chat not found',
+          currentSessionId: null,
+          messages: [],
+        );
+      } else {
+        // print('Failed to load messages: $e');
+        state = state.copyWith(isLoading: false, error: 'Failed to load messages');
+      }
     } catch (e) {
-      print('Failed to load messages: $e');
+      // print('Failed to load messages: $e');
       state = state.copyWith(isLoading: false, error: 'Failed to load messages');
     }
   }
@@ -264,7 +289,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         return response.data['text'] as String?;
       }
     } catch (e) {
-      print('Transcription error: $e');
+      // print('Transcription error: $e');
       // Don't set error state here to avoid disrupting chat
     }
     return null;
@@ -322,7 +347,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       // Build full URL
       final url = '${ApiConstants.apiUrl}${ApiConstants.chatStream(sessionId)}';
       
-      print('Starting SSE stream to: $url'); // Debug
+      // print('Starting SSE stream to: $url'); // Debug
       
       // Use SSE client for proper streaming (works on web)
       await for (final event in sseClient.stream(
@@ -334,7 +359,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         },
         authToken: authToken,
       )) {
-        print('SSE event: ${event.event}'); // Debug
+        // print('SSE event: ${event.event}'); // Debug
         
         switch (event.event) {
           case 'done':
@@ -350,6 +375,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
               isScraping: false,
             );
             _finalizeStreamingMessage();
+            return;
+            
+          case 'quota_exceeded':
+            // Show quota message above text box like ChatGPT
+            state = state.copyWith(
+              quotaExceeded: true,
+              quotaMessage: event.data['message']?.toString() ?? 'Daily limit reached. Come back tomorrow.',
+              quotaResetHours: event.data['reset_in_hours'] as int?,
+              isStreaming: false,
+              isThinking: false,
+            );
+            _removeLastMessage(); // Remove the placeholder AI message
             return;
             
           case 'token':
@@ -426,7 +463,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       
       _finalizeStreamingMessage();
     } catch (e) {
-      print('Streaming error: $e');
+      // print('Streaming error: $e');
       state = state.copyWith(
         isStreaming: false,
         error: 'Failed to send message: $e',
@@ -441,7 +478,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Log first token timing for performance tracking
     if (_streamStartTime != null && _isFirstToken) {
       final elapsed = DateTime.now().difference(_streamStartTime!).inMilliseconds;
-      print('First token received in ${elapsed}ms');
+      // print('First token received in ${elapsed}ms');
       _isFirstToken = false;
     }
     
@@ -466,114 +503,139 @@ class ChatNotifier extends StateNotifier<ChatState> {
   // Track first token for timing
   bool _isFirstToken = true;
 
-  /// Handle new event-based streaming format for ChatGPT-style UI
-  void _handleStreamEvent(Map<String, dynamic> json) {
-    final event = json['event'] as String;
-    
-    switch (event) {
-      case 'thinking_started':
-        state = state.copyWith(
-          isThinking: true,
-          isSearching: false,
-          isScraping: false,
-        );
-        break;
-        
-      case 'search_started':
-        state = state.copyWith(
-          isThinking: false,
-          isSearching: true,
-          isScraping: false,
-        );
-        break;
-        
-      case 'scrape_started':
-        final sources = (json['sources'] as List<dynamic>?)
-            ?.map((e) => e.toString())
-            .toList() ?? [];
-        state = state.copyWith(
-          isSearching: false,
-          isScraping: true,
-          scrapingSources: sources,
-        );
-        break;
-        
-      case 'source_scraped':
-        // Individual source completed - could add to a "completed" list
-        // For now, just log it
-        print('Source scraped: ${json['title']}');
-        break;
-        
-      case 'scrape_completed':
-        final headlines = (json['headlines'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .toList() ?? [];
-        state = state.copyWith(
-          isScraping: false,
-          headlines: headlines,
-        );
-        break;
-        
-      case 'scrape_error':
-        print('Scrape error: ${json['error']}');
-        state = state.copyWith(
-          isSearching: false,
-          isScraping: false,
-        );
-        break;
-        
-      case 'scrape_fallback':
-        // Web scraping failed, falling back to direct LLM
-        print('Scrape fallback: ${json['reason']}');
-        state = state.copyWith(
-          isSearching: false,
-          isScraping: false,
-          scrapingSources: [],
-        );
-        break;
-        
-      case 'answer_stream_started':
-        state = state.copyWith(
-          isThinking: false,
-          isSearching: false,
-          isScraping: false,
-        );
-        break;
-        
-      case 'token':
-        final content = json['content']?.toString() ?? '';
-        if (content.isNotEmpty) {
-          _appendToStreamingMessage(content);
-        }
-        break;
-        
-      case 'fallback_notice':
-        print('Using fallback model: ${json['fallback_model']}');
-        break;
-        
-      case 'answer_completed':
-        _finalizeStreamingMessage();
-        state = state.copyWith(
-          isThinking: false,
-          isSearching: false,
-          isScraping: false,
-          scrapingSources: [],
-          headlines: [],
-        );
-        break;
-        
-      case 'error':
-        state = state.copyWith(
-          error: json['error']?.toString() ?? 'Unknown error',
-          isStreaming: false,
-          isThinking: false,
-          isSearching: false,
-          isScraping: false,
-        );
-        _finalizeStreamingMessage();
-        break;
+  /// Clear quota exceeded message
+  void clearQuotaMessage() {
+    state = state.copyWith(
+      quotaExceeded: false,
+      quotaMessage: null,
+      quotaResetHours: null,
+    );
+  }
+  
+  /// Cancel ongoing search/streaming
+  void cancelSearch() {
+    sseClient.cancel();
+    state = state.copyWith(
+      isStreaming: false,
+      isThinking: false,
+      isSearching: false,
+      isScraping: false,
+      scrapingSources: [],
+    );
+    // Remove the streaming message if present
+    if (state.messages.isNotEmpty && state.messages.last.isStreaming) {
+      _removeLastMessage();
     }
   }
+
+  /// Handle new event-based streaming format for ChatGPT-style UI
+  // void _handleStreamEvent(Map<String, dynamic> json) {
+  //   final event = json['event'] as String;
+    
+  //   switch (event) {
+  //     case 'thinking_started':
+  //       state = state.copyWith(
+  //         isThinking: true,
+  //         isSearching: false,
+  //         isScraping: false,
+  //       );
+  //       break;
+        
+  //     case 'search_started':
+  //       state = state.copyWith(
+  //         isThinking: false,
+  //         isSearching: true,
+  //         isScraping: false,
+  //       );
+  //       break;
+        
+  //     case 'scrape_started':
+  //       final sources = (json['sources'] as List<dynamic>?)
+  //           ?.map((e) => e.toString())
+  //           .toList() ?? [];
+  //       state = state.copyWith(
+  //         isSearching: false,
+  //         isScraping: true,
+  //         scrapingSources: sources,
+  //       );
+  //       break;
+        
+  //     case 'source_scraped':
+  //       // Individual source completed - could add to a "completed" list
+  //       // For now, just log it
+  //       // print('Source scraped: ${json['title']}');
+  //       break;
+        
+  //     case 'scrape_completed':
+  //       final headlines = (json['headlines'] as List<dynamic>?)
+  //           ?.map((e) => Map<String, dynamic>.from(e as Map))
+  //           .toList() ?? [];
+  //       state = state.copyWith(
+  //         isScraping: false,
+  //         headlines: headlines,
+  //       );
+  //       break;
+        
+  //     case 'scrape_error':
+  //       // print('Scrape error: ${json['error']}');
+  //       state = state.copyWith(
+  //         isSearching: false,
+  //         isScraping: false,
+  //       );
+  //       break;
+        
+  //     case 'scrape_fallback':
+  //       // Web scraping failed, falling back to direct LLM
+  //       // print('Scrape fallback: ${json['reason']}');
+  //       state = state.copyWith(
+  //         isSearching: false,
+  //         isScraping: false,
+  //         scrapingSources: [],
+  //       );
+  //       break;
+        
+  //     case 'answer_stream_started':
+  //       state = state.copyWith(
+  //         isThinking: false,
+  //         isSearching: false,
+  //         isScraping: false,
+  //       );
+  //       break;
+        
+  //     case 'token':
+  //       final content = json['content']?.toString() ?? '';
+  //       if (content.isNotEmpty) {
+  //         _appendToStreamingMessage(content);
+  //       }
+  //       break;
+        
+  //     case 'fallback_notice':
+  //       // print('Using fallback model: ${json['fallback_model']}');
+  //       break;
+        
+  //     case 'answer_completed':
+  //       _finalizeStreamingMessage();
+  //       state = state.copyWith(
+  //         isThinking: false,
+  //         isSearching: false,
+  //         isScraping: false,
+  //         scrapingSources: [],
+  //         headlines: [],
+  //       );
+  //       break;
+        
+  //     case 'error':
+  //       state = state.copyWith(
+  //         error: json['error']?.toString() ?? 'Unknown error',
+  //         isStreaming: false,
+  //         isThinking: false,
+  //         isSearching: false,
+  //         isScraping: false,
+  //       );
+  //       _finalizeStreamingMessage();
+  //       break;
+  //   }
+  // }
 
   void _finalizeStreamingMessage() {
     // Flush any remaining tokens in buffer

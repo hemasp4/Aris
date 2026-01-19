@@ -101,7 +101,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     const SizedBox(height: 8),
                     
                     Text(
-                      'Start your journey with Aris AI',
+                      'Start your journey with Aris',
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 16,

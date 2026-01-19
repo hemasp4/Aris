@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:share_plus/share_plus.dart';
@@ -33,7 +33,7 @@ class _ShareLinkScreenState extends ConsumerState<ShareLinkScreen> {
   bool _isLoading = true; // Start with loading state
   bool _isSharing = false;
   String? _generatedLink;
-  bool _linkCopied = false;
+
   bool _chatPreviewReady = false;
 
   @override
@@ -220,23 +220,7 @@ class _ShareLinkScreenState extends ConsumerState<ShareLinkScreen> {
     );
   }
 
-  void _copyLink() {
-    if (_generatedLink != null) {
-      Clipboard.setData(ClipboardData(text: _generatedLink!));
-      setState(() => _linkCopied = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Link copied to clipboard'),
-          backgroundColor: _isDarkMode ? AppColors.surface : Colors.black87,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) setState(() => _linkCopied = false);
-      });
-    }
-  }
+
 
   Future<void> _shareLink() async {
     setState(() => _isSharing = true);

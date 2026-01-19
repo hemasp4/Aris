@@ -36,7 +36,7 @@ class ExpandableInputBox extends ConsumerStatefulWidget {
     super.key,
     required this.controller,
     required this.focusNode,
-    this.hintText = 'Message Aris...',
+    this.hintText = 'Ask Aris',
     this.isStreaming = false,
     this.isVoiceListening = false,
     this.isVoiceConvertedText = false,
@@ -324,19 +324,20 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
               mainAxisAlignment: MainAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Round Loading Animation (ChatGPT style)
-                Container(
-                  width: 24,
-                  height: 24,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      isDarkMode ? Colors.white : const Color(0xFF10A37F),
-                    ),
-                  ).animate(onPlay: (c) => c.repeat())
-                    .shimmer(duration: 1500.ms, color: isDarkMode ? Colors.white24 : Colors.green.shade100),
-                ),
+                // Round Loading Animation (ChatGPT style) - Only show when processing
+                if (voiceData.state == VoiceInputState.thinking || voiceData.state == VoiceInputState.finalizing)
+                  Container(
+                    width: 24,
+                    height: 24,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        isDarkMode ? Colors.white : const Color(0xFF10A37F),
+                      ),
+                    ).animate(onPlay: (c) => c.repeat())
+                      .shimmer(duration: 1500.ms, color: isDarkMode ? Colors.white24 : Colors.green.shade100),
+                  ),
                 
                 // Cancel Button (X)
                 GestureDetector(
@@ -396,7 +397,10 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
       );
     }
 
-    // Default Text Input Layout
+    // Responsive font scaling
+    final textScaler = MediaQuery.textScalerOf(context);
+    final scaledFontSize = 15.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
+
     return Padding(
       padding: const EdgeInsets.only(left: 14, right: 6, top: 6, bottom: 6),
       child: IntrinsicHeight(
@@ -411,20 +415,19 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
                    maxHeight: (_maxLines * _baseLineHeight) + _basePadding,
                  ),
                  child: SingleChildScrollView(
-                   reverse: true,
                    child: TextField(
                      controller: widget.controller,
                      focusNode: widget.focusNode,
                      style: TextStyle(
                        color: AppColors.primaryText,
-                       fontSize: 15,
+                       fontSize: scaledFontSize,
                        height: 1.4,
                      ),
                      decoration: InputDecoration(
                        hintText: widget.hintText,
                        hintStyle: TextStyle(color: AppColors.secondaryText),
                        border: InputBorder.none,
-                       contentPadding: EdgeInsets.zero,
+                       contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4), // Add padding for better centering
                        isDense: true,
                      ),
                      maxLines: null,
@@ -545,7 +548,7 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
     return Container(
       width: 35,
       height: 35,
-      margin: const EdgeInsets.only(bottom: 2),
+      margin: const EdgeInsets.only(left: 4,bottom: 2,right: 4),
       decoration: const BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,

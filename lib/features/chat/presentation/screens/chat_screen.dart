@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:hugeicons/hugeicons.dart';
@@ -14,17 +14,17 @@ import '../../providers/group_chat_provider.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../widgets/suggestion_chip.dart';
-import '../widgets/voice_input_button.dart';
-import '../widgets/voice_waveform_widget.dart';
+
 import '../widgets/message_bubble.dart';
 import '../widgets/chat_info_panel.dart';
 import '../widgets/attachment_bottom_sheet.dart';
 import '../widgets/chat_sidebar.dart';
 import '../widgets/group_chat_dialogs.dart';
 import '../widgets/group_chat_modal.dart';
-import '../widgets/profile_edit_modal.dart';
+import '../../../settings/presentation/widgets/profile_edit_modal.dart';
 import '../widgets/group_options_menu.dart';
 import '../widgets/expandable_input_box.dart';
+import '../widgets/report_dialog.dart';
 import '../widgets/fetch_indicator.dart';
 import '../widgets/headline_cards.dart';
 import 'temporary_chat_info_screen.dart';
@@ -57,6 +57,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ref.read(chatProvider.notifier).loadMessages(widget.chatId!);
       });
     }
+    
+
     
     _scrollController.addListener(_onScroll);
     _messageController.addListener(() => setState(() {}));
@@ -241,6 +243,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for chat errors (e.g. 404 Not Found)
+    ref.listen<ChatState>(chatProvider, (previous, next) {
+      if (next.error == 'Chat not found' && widget.chatId != null) {
+        // Redirect to new chat if current ID is invalid
+        context.go('/chat');
+      }
+    });
+
     final messages = ref.watch(currentMessagesProvider);
     final isStreaming = ref.watch(isStreamingProvider);
     final voiceState = ref.watch(voiceInputProvider).state;
@@ -458,7 +468,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final chatState = ref.watch(chatProvider);
     
     // Get chat title for active state
-    String chatTitle = 'Aris AI';
+    String chatTitle = 'Aris';
     if (!isEmptyChat && chatState.currentSessionId != null) {
       final sessions = ref.watch(chatSessionsProvider);
       final currentSession = sessions.where((s) => s.id == chatState.currentSessionId).firstOrNull;
@@ -506,7 +516,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.35),
                     child: Text(
-                      isGroupChat ? chatTitle : 'Aris AI',
+                      isGroupChat ? chatTitle : 'Aris',
                       style: const TextStyle(
                         color: AppColors.textPrimary,
                         fontSize: 14,
@@ -651,7 +661,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           // More options icon
           _buildPillIconButton(
             icon: HugeIcons.strokeRoundedMoreVertical,
-            onTap: () => _showMoreOptionsMenu(chatTitle),
+            onTap: () => _showChatOptionsBottomSheet(chatTitle),
           ),
         ],
       ),
@@ -683,99 +693,121 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
   }
-  
-  /// Show more options popup menu (positioned at top-right corner)
-  void _showMoreOptionsMenu(String chatTitle) {
-    final chatState = ref.read(chatProvider);
-    final sessions = ref.read(chatSessionsProvider);
-    final currentSession = sessions.where((s) => s.id == chatState.currentSessionId).firstOrNull;
-    final isPinned = currentSession?.isPinned ?? false;
-    final isArchived = currentSession?.isArchived ?? false;
-    
-    showMenu<String>(
+
+  void _showChatOptionsBottomSheet(String chatTitle) {
+    showModalBottomSheet(
       context: context,
-      position: RelativeRect.fromLTRB(
-        MediaQuery.of(context).size.width - 200,
-        kToolbarHeight + MediaQuery.of(context).padding.top,
-        16,
-        0,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: AppColors.surface,
-      items: [
-        // Chat title header
-        PopupMenuItem<String>(
-          enabled: false,
-          height: 40,
-          child: Text(
-            chatTitle,
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textMuted.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                   Expanded(
+                    child: Text(
+                      'Chat options',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: AppColors.dividerDark, height: 1),
+            ListTile(
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedShare01, color: AppColors.textPrimary, size: 24),
+              title: const Text('Share', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () {
+                Navigator.pop(context);
+                _handleShare();
+              },
+            ),
+            ListTile(
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedEdit02, color: AppColors.textPrimary, size: 24),
+              title: const Text('Rename', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () {
+                Navigator.pop(context);
+                _handleMenuAction('rename');
+              },
+            ),
+            Consumer(
+              builder: (context, ref, _) {
+                final chatState = ref.watch(chatProvider);
+                final sessions = ref.watch(chatSessionsProvider);
+                final currentSession = sessions.where((s) => s.id == chatState.currentSessionId).firstOrNull;
+                final isPinned = currentSession?.isPinned ?? false;
+                final isArchived = currentSession?.isArchived ?? false;
+                
+                return Column(
+                  children: [
+                     ListTile(
+                      leading: HugeIcon(
+                        icon: isPinned ? HugeIcons.strokeRoundedPinOff : HugeIcons.strokeRoundedPin,
+                        color: AppColors.textPrimary,
+                        size: 24,
+                      ),
+                      title: Text(isPinned ? 'Unpin chat' : 'Pin chat', style: const TextStyle(color: AppColors.textPrimary)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _handleMenuAction('pin');
+                      },
+                    ),
+                    ListTile(
+                      leading: HugeIcon(
+                        icon: isArchived ? HugeIcons.strokeRoundedArchive02 : HugeIcons.strokeRoundedArchive,
+                        color: AppColors.textPrimary,
+                        size: 24,
+                      ),
+                      title: Text(isArchived ? 'Unarchive' : 'Archive', style: const TextStyle(color: AppColors.textPrimary)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _handleMenuAction('archive');
+                      },
+                    ),
+                  ],
+                );
+              }
+            ),
+            ListTile(
+              leading: Icon(Icons.settings_outlined, color: AppColors.textPrimary),
+              title: const Text('Customize Aris', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/settings/personalization');
+              },
+            ),
+            const Divider(color: AppColors.dividerDark, height: 1),
+            ListTile(
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedDelete02, color: AppColors.error, size: 24),
+              title: const Text('Delete chat', style: TextStyle(color: AppColors.error)),
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteConfirmation();
+              },
+            ),
+          ],
         ),
-        const PopupMenuDivider(height: 1),
-        // Share
-        PopupMenuItem<String>(
-          value: 'share',
-          child: _buildMenuOption(
-            icon: HugeIcons.strokeRoundedShare01,
-            label: 'Share',
-          ),
-        ),
-        // Rename
-        PopupMenuItem<String>(
-          value: 'rename',
-          child: _buildMenuOption(
-            icon: HugeIcons.strokeRoundedEdit02,
-            label: 'Rename',
-          ),
-        ),
-        // Archive/Unarchive
-        PopupMenuItem<String>(
-          value: 'archive',
-          child: _buildMenuOption(
-            icon: isArchived 
-                ? HugeIcons.strokeRoundedArchive02 
-                : HugeIcons.strokeRoundedArchive,
-            label: isArchived ? 'Unarchive' : 'Archive',
-          ),
-        ),
-        // Pin/Unpin
-        PopupMenuItem<String>(
-          value: 'pin',
-          child: _buildMenuOption(
-            icon: isPinned 
-                ? HugeIcons.strokeRoundedPinOff 
-                : HugeIcons.strokeRoundedPin,
-            label: isPinned ? 'Unpin chat' : 'Pin chat',
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        // Delete (destructive)
-        PopupMenuItem<String>(
-          value: 'delete',
-          child: _buildMenuOption(
-            icon: HugeIcons.strokeRoundedDelete02,
-            label: 'Delete',
-            isDestructive: true,
-          ),
-        ),
-        // Report
-        PopupMenuItem<String>(
-          value: 'report',
-          child: _buildMenuOption(
-            icon: HugeIcons.strokeRoundedFlag02,
-            label: 'Report',
-          ),
-        ),
-      ],
-    ).then((value) {
-      if (value == null) return;
-      _handleMenuAction(value);
-    });
+      ),
+    );
   }
   
   /// Build menu option row
@@ -883,199 +915,61 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
   
   /// Show report dialog
+  /// Show report dialog
   void _showReportDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Report this chat?',
-          style: TextStyle(color: AppColors.textPrimary),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Select a reason for reporting:',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            _buildReportOption(ctx, 'Inappropriate content'),
-            _buildReportOption(ctx, 'Spam or misleading'),
-            _buildReportOption(ctx, 'Harmful or unsafe'),
-            _buildReportOption(ctx, 'Other'),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildReportOption(BuildContext ctx, String reason) {
-    return InkWell(
-      onTap: () {
-        Navigator.pop(ctx);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Report submitted: $reason'),
-            backgroundColor: AppColors.surface,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        width: double.infinity,
-        child: Text(
-          reason,
-          style: const TextStyle(color: AppColors.textPrimary),
-        ),
-      ),
-    );
+    ReportDialog.show(context);
   }
 
-  /// Show menu for regular chats
-  Future<void> _showChatTitleMenu() async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.surfaceDark,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Handle
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.textMuted.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            
-            // Title with dropdown icon
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Chat Options',
-                      style: const TextStyle(
-                        color: AppColors.textDark,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Icon(Icons.keyboard_arrow_up, color: AppColors.textMuted, size: 20),
-                ],
-              ),
-            ),
-            
-            const Divider(color: AppColors.dividerDark),
-            
-            // Menu items
-            ListTile(
-              leading: Icon(Icons.edit_outlined, color: AppColors.textDark, size: 22),
-              title: Text('Rename chat', style: TextStyle(color: AppColors.textDark, fontSize: 15)),
-              onTap: () => Navigator.pop(context, 'rename'),
-            ),
-            ListTile(
-              leading: Icon(Icons.share_outlined, color: AppColors.textDark, size: 22),
-              title: Text('Share', style: TextStyle(color: AppColors.textDark, fontSize: 15)),
-              onTap: () => Navigator.pop(context, 'share'),
-            ),
-            ListTile(
-              leading: Icon(Icons.settings_outlined, color: AppColors.textDark, size: 22),
-              title: Text('Customize Aris', style: TextStyle(color: AppColors.textDark, fontSize: 15)),
-              onTap: () => Navigator.pop(context, 'customize'),
-            ),
-            ListTile(
-              leading: Icon(Icons.flag_outlined, color: AppColors.error, size: 22),
-              title: Text('Report', style: TextStyle(color: AppColors.error, fontSize: 15)),
-              onTap: () => Navigator.pop(context, 'report'),
-            ),
-            ListTile(
-              leading: Icon(Icons.delete_outline, color: AppColors.error, size: 22),
-              title: Text('Delete chat', style: TextStyle(color: AppColors.error, fontSize: 15)),
-              onTap: () => Navigator.pop(context, 'delete'),
-            ),
-            
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-    
-    if (action == null || !mounted) return;
-    
-    switch (action) {
-      case 'rename':
-        final newTitle = await showRenameGroupDialog(context, 'Chat');
-        if (newTitle != null && newTitle.isNotEmpty && widget.chatId != null) {
-          // TODO: Implement rename chat
-        }
-        break;
-      case 'share':
-        _handleShare();
-        break;
-      case 'customize':
-        // Navigate to customization
-        break;
-      case 'report':
-        // Report chat
-        break;
-      case 'delete':
-        if (widget.chatId != null) {
-          ref.read(chatProvider.notifier).deleteSession(widget.chatId!);
-          context.go('/chat');
-        }
-        break;
-    }
-  }
 
-  Future<void> _showGroupTitleMenu(GroupChat group) async {
+
+  void _showGroupTitleMenu(GroupChat group) {
+    if (!mounted) return;
+    
+    // Find the position of the title/pill to anchor the menu
+    // We can assume the top center area or use a fixed position if we can't get the specific widget context easily here
+    // ChatGPT usually anchors to the top bar title
+    // For simplicity, we'll anchor to the top-center-leftish area relative to screen
+    final mediaQuery = MediaQuery.of(context);
+    final anchorOffset = Offset(mediaQuery.size.width / 2, mediaQuery.padding.top + 50);
+
     final user = ref.read(currentUserProvider);
-    final action = await showChatTitleMenu(
+    final isOwner = group.ownerId == (user?.id ?? '');
+
+    GroupOptionsMenu.show(
       context,
-      ref,
-      groupId: group.id,
-      title: group.title,
-      isOwner: group.ownerId == (user?.id ?? ''),
-    );
-    
-    if (action == null || !mounted) return;
-    
-    switch (action) {
-      case 'people':
-        // Show people in group
-        break;
-      case 'link':
+      position: anchorOffset,
+      groupTitle: group.title,
+      onViewMembers: () {
+        // TODO: Show members dialog
+      },
+      onAddMembers: () {
+        // TODO: Show add members dialog
+      },
+      onManageLink: () {
         showGroupLinkDialog(context, group.link ?? '');
-        break;
-      case 'rename':
+      },
+      onRename: () async {
         final newTitle = await showRenameGroupDialog(context, group.title);
         if (newTitle != null && newTitle.isNotEmpty) {
           ref.read(groupChatProvider.notifier).renameGroup(group.id, newTitle);
         }
-        break;
-      case 'customize':
+      },
+      onCustomize: () {
         // Navigate to customization
-        break;
-      case 'report':
-        // Report group
-        break;
-      case 'delete':
+      },
+      onMute: () {
+        // Toggle mute
+      },
+      onReport: () {
+        _showReportDialog();
+      },
+      onLeave: () {
+        // Confirm leave
+      },
+      onDelete: isOwner ? () {
         ref.read(groupChatProvider.notifier).deleteGroup(group.id);
-        break;
-    }
+      } : null,
+    );
   }
 
   void _showModelSelectorDialog(BuildContext context) {
@@ -1355,103 +1249,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
   
-  Widget _buildMessageBubble(BuildContext context, ChatMessage message) {
-    final isUser = message.role == 'user';
-    
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!isUser) ...[
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Center(
-                child: Text(
-                  'A',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isUser ? AppColors.userBubbleDark : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (isUser)
-                    Text(
-                      message.content,
-                      style: TextStyle(
-                        color: AppColors.textDark,
-                        fontSize: 15,
-                      ),
-                    )
-                  else
-                    MarkdownBody(
-                      data: message.content,
-                      styleSheet: MarkdownStyleSheet(
-                        p: TextStyle(
-                          color: AppColors.textDark,
-                          fontSize: 15,
-                          height: 1.5,
-                        ),
-                        code: TextStyle(
-                          backgroundColor: AppColors.surfaceDarkElevated,
-                          fontFamily: 'monospace',
-                          color: AppColors.textDark,
-                        ),
-                        codeblockDecoration: BoxDecoration(
-                          color: AppColors.surfaceDarkElevated,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  if (message.isStreaming) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          
-          if (isUser) ...[
-            const SizedBox(width: 12),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.avatarOrange,
-              child: const Icon(Icons.person, color: Colors.white, size: 18),
-            ),
-          ],
-        ],
-      ),
-    ).animate().fadeIn(duration: 200.ms);
-  }
+
 
   Future<void> _handleVoiceCancel() async {
     await ref.read(voiceInputProvider.notifier).cancelRecording();
@@ -1462,25 +1260,69 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     
     final chatState = ref.watch(chatProvider);
     
-    return ExpandableInputBox(
-      controller: _messageController,
-      focusNode: _focusNode,
-      hintText: 'Message Aris...',
-      isStreaming: isStreaming,
-      isVoiceListening: isListening,
-      isVoiceConvertedText: _isVoiceConverted,
-      attachedImages: const [], // TODO: Add image attachment state
-      researchMode: chatState.researchMode,
-      onSend: _sendMessage,
-      onAttachmentTap: _showAttachmentOptions,
-      onVoiceTap: _handleVoiceTap,
-      onVoiceStopAndSend: _handleVoiceStopAndSend,
-      onVoiceCancel: _handleVoiceCancel,
-      onCancelStream: () => ref.read(chatProvider.notifier).cancelStream(),
-      onClearResearchMode: () => ref.read(chatProvider.notifier).setResearchMode(null),
-      onRemoveImage: (file) {
-        // TODO: Implement image removal
-      },
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Quota exceeded message (ChatGPT-style above input)
+        if (chatState.quotaExceeded && chatState.quotaMessage != null)
+          GestureDetector(
+            onTap: () => ref.read(chatProvider.notifier).clearQuotaMessage(),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: AppColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      chatState.quotaMessage!,
+                      style: TextStyle(
+                        color: AppColors.warning,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.close, size: 14, color: AppColors.warning),
+                ],
+              ),
+            ),
+          ),
+        
+        // Input box
+        ExpandableInputBox(
+          controller: _messageController,
+          focusNode: _focusNode,
+          hintText: 'Ask Aris',
+          isStreaming: isStreaming,
+          isVoiceListening: isListening,
+          isVoiceConvertedText: _isVoiceConverted,
+          attachedImages: const [], // TODO: Add image attachment state
+          researchMode: chatState.researchMode,
+          onSend: _sendMessage,
+          onAttachmentTap: _showAttachmentOptions,
+          onVoiceTap: _handleVoiceTap,
+          onVoiceStopAndSend: _handleVoiceStopAndSend,
+          onVoiceCancel: _handleVoiceCancel,
+          onCancelStream: () => ref.read(chatProvider.notifier).cancelStream(),
+          onClearResearchMode: () {
+            // Cancel ongoing search and clear research mode
+            ref.read(chatProvider.notifier).cancelSearch();
+            ref.read(chatProvider.notifier).setResearchMode(null);
+          },
+          onRemoveImage: (file) {
+            // TODO: Implement image removal
+          },
+        ),
+      ],
     );
   }
 }
+
+

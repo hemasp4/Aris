@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import '../../../core/services/dio_client.dart';
 
 /// Service for managing projects (private workspaces)
