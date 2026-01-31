@@ -1,7 +1,7 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:hugeicons/hugeicons.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -66,11 +66,35 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   
   double _currentHeight = _minHeight;
   int _lineCount = 1;
+  
+  // Debounce for voice cancel button to prevent accidental cancellation
+  DateTime? _voiceStartTime;
+  
+  bool get _canCancelVoice {
+    if (_voiceStartTime == null) return false;
+    final elapsed = DateTime.now().difference(_voiceStartTime!);
+    return elapsed.inMilliseconds > 500; // 500ms debounce
+  }
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onTextChanged);
+    // Initialize voice start time if already in voice mode
+    if (widget.isVoiceListening) {
+      _voiceStartTime = DateTime.now();
+    }
+  }
+  
+  @override
+  void didUpdateWidget(covariant ExpandableInputBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Track when voice mode starts for debounce
+    if (widget.isVoiceListening && !oldWidget.isVoiceListening) {
+      _voiceStartTime = DateTime.now();
+    } else if (!widget.isVoiceListening && oldWidget.isVoiceListening) {
+      _voiceStartTime = null;
+    }
   }
 
   @override
@@ -129,27 +153,50 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
     final hasText = widget.controller.text.isNotEmpty;
     final hasImages = widget.attachedImages.isNotEmpty;
     final hasResearchMode = widget.researchMode != null;
+    
+    // Watch voice state for the Floating Preview Box
+    final voiceData = ref.watch(voiceInputProvider);
+    final isVoiceActive = voiceData.state == VoiceInputState.listening || 
+                          voiceData.state == VoiceInputState.thinking || 
+                          voiceData.state == VoiceInputState.finalizing;
 
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 720),
         child: Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Fixed + button (OUTSIDE rounded box, left side)
-              _buildAttachmentButton(),
-              
-              const SizedBox(width: 8),
-              
-              // Rounded input container (holds pill + images + text + buttons)
-              Expanded(
-                child: _buildRoundedInputContainer(
-                  hasText: hasText,
-                  hasImages: hasImages,
-                  hasResearchMode: hasResearchMode,
+              // 1. Floating Preview Box (Above Input)
+              if (isVoiceActive && (voiceData.transcribedText?.isNotEmpty ?? false))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8, left: 48, right: 48), // Centered above input
+                  child: VoiceListeningOverlay(
+                    text: voiceData.transcribedText ?? '',
+                    isThinking: voiceData.state == VoiceInputState.thinking,
+                  ),
                 ),
+
+              // 2. Main Input Row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Fixed + button (OUTSIDE rounded box, left side)
+                  _buildAttachmentButton(),
+                  
+                  const SizedBox(width: 8),
+                  
+                  // Rounded input container (holds pill + images + text + buttons)
+                  Expanded(
+                    child: _buildRoundedInputContainer(
+                      hasText: hasText,
+                      hasImages: hasImages,
+                      hasResearchMode: hasResearchMode,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -165,28 +212,47 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
     required bool hasImages,
     required bool hasResearchMode,
   }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        color: AppColors.inputBackground,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Search pill (inside, top-left) - no separator
-          if (hasResearchMode)
-            _buildInlineResearchPill(),
-          
-          // Image previews (inside, horizontal scroll) - no separator
-          if (hasImages)
-            _buildInlineImagePreviews(),
-          
-          // Text input row with mic/send buttons
-          _buildTextInputRow(hasText),
-        ],
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    // ChatGPT Style: Deep dark/black background with blur
+    // The user's image shows a very dark, neutral pill.
+    
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(26), // Reverted to 26 as requested (less rounded)
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15), // Stronger blur
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            // Use near-black with transparency for that "deep glass" look
+            color: isDarkMode 
+                ? const Color(0xFF171717).withValues(alpha: 0.75) 
+                : const Color(0xFFFFFFFF).withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(26), // Reverted to 26
+            // Slightly more visible border
+            border: Border.all(
+              color: isDarkMode ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08),
+              width: 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Search pill (inside, top-left) - no separator
+              if (hasResearchMode)
+                _buildInlineResearchPill(),
+              
+              // Image previews (inside, horizontal scroll) - no separator
+              if (hasImages)
+                _buildInlineImagePreviews(),
+              
+              // Text input row with mic/send buttons
+              _buildTextInputRow(hasText),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -236,8 +302,8 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
             const SizedBox(width: 6),
             GestureDetector(
               onTap: widget.onClearResearchMode,
-              child: Icon(
-                Icons.close,
+              child: HugeIcon(
+                icon: HugeIcons.strokeRoundedCancel01,
                 size: 14,
                 color: Color(0xFF0EA5E9),
               ),
@@ -304,105 +370,164 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   Widget _buildTextInputRow(bool hasText) {
     // Watch voice provider for overlay data
     final voiceData = ref.watch(voiceInputProvider);
-    final isVoiceActive = voiceData.state == VoiceInputState.listening || 
-                          voiceData.state == VoiceInputState.thinking ||
-                          voiceData.state == VoiceInputState.finalizing;
     
     // Voice Mode Layout (ChatGPT-style) - REFACTORED
     // Instead of replacing the row, we overlay/modify the input behavior
     if (widget.isVoiceListening) {
       final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+      final isProcessing = voiceData.state == VoiceInputState.thinking || 
+                           voiceData.state == VoiceInputState.finalizing ||
+                           voiceData.state == VoiceInputState.transcribing;
       
+      // Check if we're in the noSpeech state
+      final hasNoSpeech = voiceData.state == VoiceInputState.noSpeech;
+      
+      // ChatGPT-exact floating card layout - NOW TRANSPARENT to match outer pill
+      // Removed excessive padding to let content fill the pill better
       return Container(
-        height: 110, // Expanded height for voice mode
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.transparent, 
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Left: Cancel Button (X) + Loading Animation
-            Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Round Loading Animation (ChatGPT style) - Only show when processing
-                if (voiceData.state == VoiceInputState.thinking || voiceData.state == VoiceInputState.finalizing)
-                  Container(
-                    width: 24,
-                    height: 24,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        isDarkMode ? Colors.white : const Color(0xFF10A37F),
-                      ),
-                    ).animate(onPlay: (c) => c.repeat())
-                      .shimmer(duration: 1500.ms, color: isDarkMode ? Colors.white24 : Colors.green.shade100),
-                  ),
-                
-                // Cancel Button (X)
-                GestureDetector(
-                  onTap: widget.onVoiceCancel,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    margin: const EdgeInsets.only(bottom: 1),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceLight.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.close, color: AppColors.secondaryText, size: 20),
-                  ),
-                ),
-              ],
-            ),
-            
-            // Center: Stacked Overlay + Waveform
-            Expanded(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                   // Base: "See text" placeholder
-                   Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'See text',
-                        style: TextStyle(
-                          color: AppColors.primaryText.withValues(alpha: 0.5),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+              // Top section: Loading indicator at top-left (when processing)
+              if (isProcessing)
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 12, right: 16, bottom: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          isDarkMode ? Colors.white70 : const Color(0xFF10A37F),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      const VoiceWaveformBars(height: 24, barCount: 20),
-                    ],
+                    ),
                   ),
-                  
-                  // Overlay: Partial Text (only when active)
-                  if (isVoiceActive && (voiceData.transcribedText?.isNotEmpty ?? false))
-                    Positioned.fill(
-                      child: VoiceListeningOverlay(
-                        text: voiceData.transcribedText ?? '',
-                        isThinking: voiceData.state == VoiceInputState.thinking,
+                ),
+              
+              // Main content area: "See text" or waveform or "No speech detected"
+              if (!isProcessing && !hasNoSpeech)
+                GestureDetector(
+                  onTap: widget.onVoiceStopAndSend,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Text(
+                      'See text',
+                      style: TextStyle(
+                        color: isDarkMode 
+                            ? Colors.white.withValues(alpha: 0.6)
+                            : Colors.grey.shade600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                ],
+                  ),
+                ),
+              
+              // Bottom row: [X] [Waveform/No speech message] [↑/Retry]
+              Padding(
+                padding: const EdgeInsets.only(left: 8, right: 8, bottom: 8, top: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // X button (cancel)
+                    GestureDetector(
+                      onTap: widget.onVoiceCancel,
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        margin: const EdgeInsets.only(top: 20),
+                        decoration: BoxDecoration(
+                          color: isDarkMode 
+                              ? Colors.white.withValues(alpha: 0.12)
+                              : Colors.grey.shade300,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Icon(
+                            Icons.close,
+                            color: isDarkMode ? Colors.white70 : Colors.grey.shade700,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(width: 8),
+                    
+                    // Center: Waveform OR "No speech detected" message
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: widget.onVoiceStopAndSend,
+                        child: hasNoSpeech
+                            ? Center(
+                                child: Text(
+                                  'No speech detected',
+                                  style: TextStyle(
+                                    color: isDarkMode 
+                                        ? Colors.white.withValues(alpha: 0.5)
+                                        : Colors.grey.shade500,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              )
+                            : const VoiceWaveformBars(height: 28, barCount: 30),
+                      ),
+                    ),
+                    
+                    const SizedBox(width: 8),
+                    
+                    // Right: Send button OR Retry button (when no speech)
+                    GestureDetector(
+                      onTap: hasNoSpeech 
+                          ? widget.onVoiceTap  // Retry - start recording again
+                          : widget.onVoiceStopAndSend,  // Send/finalize
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        margin: const EdgeInsets.only(top: 20),
+                        decoration: BoxDecoration(
+                          color: hasNoSpeech
+                              ? (isDarkMode ? Colors.white.withValues(alpha: 0.12) : Colors.grey.shade300)
+                              : (isDarkMode ? Colors.white : Colors.black),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: hasNoSpeech
+                              ? Icon(
+                                  Icons.refresh,
+                                  color: isDarkMode ? Colors.white70 : Colors.grey.shade700,
+                                  size: 20,
+                                )
+                              : Icon(
+                                  Icons.arrow_upward,
+                                  color: isDarkMode ? Colors.black : Colors.white,
+                                  size: 20,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            
-            // Right: Send Button (Up Arrow)
-            _buildSendButton(hasText),
-          ],
-        ),
-      );
-    }
-
+            ],
+          ),
+        );
+      }
+    
     // Responsive font scaling
     final textScaler = MediaQuery.textScalerOf(context);
     final scaledFontSize = 15.0 * textScaler.scale(1.0).clamp(0.8, 1.3);
 
     return Padding(
-      padding: const EdgeInsets.only(left: 14, right: 6, top: 6, bottom: 6),
+      padding: const EdgeInsets.only(left: 14, right: 6, top: 4, bottom: 4),
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -427,11 +552,15 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
                        hintText: widget.hintText,
                        hintStyle: TextStyle(color: AppColors.secondaryText),
                        border: InputBorder.none,
-                       contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4), // Add padding for better centering
+                       enabledBorder: InputBorder.none,
+                       focusedBorder: InputBorder.none,
+                       filled: false, // Override global theme
+                       fillColor: Colors.transparent, // Ensure transparency
+                       contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8), // Adjusted padding (vertical 12 as requested)
                        isDense: true,
                      ),
                      maxLines: null,
-                     enabled: !widget.isStreaming,
+                     enabled: !widget.isStreaming && !widget.isVoiceListening, // Lock input during voice
                      textInputAction: TextInputAction.newline,
                      keyboardType: TextInputType.multiline,
                      textAlignVertical: TextAlignVertical.center,
@@ -465,7 +594,7 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
                           widget.controller.text = result;
                         }
                       },
-                      child: Icon(
+                      child: Icon( // Keep Zoom as standard icon or switch? Standard is fine for util.
                         Icons.open_in_full,
                         size: 16,
                         color: AppColors.secondaryText,
@@ -483,9 +612,12 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Mic button - visible when no text OR voice-converted text, AND NOT LISTENING
-                    if ((!hasText || widget.isVoiceConvertedText) && !widget.isStreaming)
-                      _buildMicButton(),
+                    // Mic button - visible when no text, OR if text is from voice
+                    if (!widget.isStreaming)
+                      if (!hasText)
+                        _buildMicButton()
+                      else if (widget.isVoiceConvertedText)
+                        _buildReloadMicButton(),
                     
                     if ((!hasText || widget.isVoiceConvertedText) && !widget.isStreaming)
                       const SizedBox(width: 4),
@@ -504,16 +636,25 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
 
   /// Fixed attachment button (+)
   Widget _buildAttachmentButton() {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    // Match the exact style of the input box (Deep Dark Glass)
     return Container(
       width: 44,
       height: 44,
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 2),
       decoration: BoxDecoration(
-        color: AppColors.inputBackground,
+        color: isDarkMode 
+            ? const Color(0xFF171717).withValues(alpha: 0.75) 
+            : const Color(0xFFFFFFFF).withValues(alpha: 0.85),
         shape: BoxShape.circle,
+        border: Border.all(
+           color: isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+           width: 1,
+        ),
       ),
       child: IconButton(
-        icon: Icon(Icons.add, color: AppColors.primaryText),
+        icon: HugeIcon(icon: HugeIcons.strokeRoundedAdd01, color: isDarkMode ? Colors.white : Colors.black, size: 24), 
         onPressed: widget.onAttachmentTap,
         padding: EdgeInsets.zero,
         tooltip: 'Attach',
@@ -524,10 +665,13 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   /// Microphone button inside input
   Widget _buildMicButton() {
     return GestureDetector(
-      onTap: widget.onVoiceTap,
+      onTap: () {
+        print('[UI] Mic button tapped in ExpandableInputBox');
+        widget.onVoiceTap?.call();
+      },
       child: Container(
-        width: 32,
-        height: 32,
+        width: 30,
+        height: 30,
         decoration: BoxDecoration(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(16),
@@ -543,11 +687,43 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
     );
   }
 
+  /// Reload Voice button (Clear text + Restart Voice)
+  Widget _buildReloadMicButton() {
+    return GestureDetector(
+      onTap: () {
+        widget.controller.clear();
+        widget.onVoiceTap?.call();
+      },
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Center(
+          child: HugeIcon(
+            // When text is already present (converted), show Mic to restart, 
+            // or we could show a special "Redo" icon. User asked for Mic icon change logic.
+            // If we want "Redo", "refresh" is good.
+            // But user said "after we converted... the mic icon changing so fix that also"
+            // implying it should probably go back to Mic or allow adding more?
+            // Actually, if we are in "See text" mode, usually we are done. 
+            // Let's stick to mic but maybe filled? Or just keep Refresh.
+            icon: HugeIcons.strokeRoundedMic02, 
+            size: 20,
+            color: AppColors.secondaryText,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Send/Stop button (fixed right position, never moves)
   Widget _buildSendButton(bool hasText) {
     return Container(
-      width: 35,
-      height: 35,
+      width: 32,
+      height: 32,
       margin: const EdgeInsets.only(left: 4,bottom: 2,right: 4),
       decoration: const BoxDecoration(
         color: Colors.white,

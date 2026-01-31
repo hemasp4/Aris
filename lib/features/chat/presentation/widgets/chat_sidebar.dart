@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hugeicons/hugeicons.dart';
 
+import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/components/custom_modal.dart';
 import '../../../../core/services/auth_service.dart' show User;
 import '../../../auth/providers/auth_provider.dart';
 import '../../providers/chat_provider.dart';
@@ -347,68 +349,137 @@ class _ChatSidebarState extends ConsumerState<ChatSidebar> {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
+      backgroundColor: Colors.transparent, // Floating effect
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E), // Dark grey
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.5),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.textMuted.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
+            // Handle for drag visual
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-            const SizedBox(height: 16),
-            Text(
-              session.title,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+             // Title
+            Padding(
+               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+               child: Text(
+                 session.title,
+                 style: GoogleFonts.inter(
+                   color: AppColors.textSecondary,
+                   fontSize: 12, 
+                   fontWeight: FontWeight.w500
+                 ),
+                 maxLines: 1,
+                 overflow: TextOverflow.ellipsis,
+               ),
             ),
-            const SizedBox(height: 16),
+            const Divider(height: 1, color: AppColors.borderSubtle),
+            
+            // Rename
+            ListTile(
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedPencilEdit02, size: 20, color: Colors.white),
+              title: Text('Rename', style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showRenameDialog(context, session);
+              },
+            ),
+            
+            // Pin
             ListTile(
               leading: HugeIcon(
-                icon: HugeIcons.strokeRoundedPin,
-                size: 22,
-                color: AppColors.textPrimary,
+                icon: session.isPinned ? HugeIcons.strokeRoundedPin : HugeIcons.strokeRoundedPin,
+                size: 20,
+                color: Colors.white,
               ),
-              title: Text(
-                session.isPinned ? 'Unpin chat' : 'Pin chat',
-                style: const TextStyle(color: AppColors.textPrimary),
-              ),
+              title: Text(session.isPinned ? 'Unpin chat' : 'Pin chat', style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
               onTap: () {
                 Navigator.pop(ctx);
                 ref.read(chatProvider.notifier).togglePinSession(session.id);
               },
             ),
+            
+            // Archive (Placeholder)
             ListTile(
-              leading: HugeIcon(
-                icon: HugeIcons.strokeRoundedDelete02,
-                size: 22,
-                color: AppColors.error,
-              ),
-              title: const Text(
-                'Delete chat',
-                style: TextStyle(color: AppColors.error),
-              ),
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedArchive, size: 20, color: Colors.white),
+              title: Text('Archive', style: GoogleFonts.inter(color: Colors.white, fontSize: 14)),
               onTap: () {
-                Navigator.pop(ctx);
-                ref.read(chatProvider.notifier).deleteSession(session.id);
+                 Navigator.pop(ctx);
+                 // Archive logic
               },
             ),
-            const SizedBox(height: 16),
+
+            const Divider(height: 1, color: AppColors.borderSubtle),
+
+            // Delete
+            ListTile(
+              leading: HugeIcon(icon: HugeIcons.strokeRoundedDelete02, size: 20, color: AppColors.danger),
+              title: Text('Delete', style: GoogleFonts.inter(color: AppColors.danger, fontSize: 14)),
+              onTap: () {
+                Navigator.pop(ctx);
+                CustomModal.show(
+                  context,
+                  title: 'Delete chat?',
+                  content: 'This will delete "${session.title}" and all its history.',
+                  confirmLabel: 'Delete',
+                  isDestructive: true,
+                  onConfirm: () {
+                    ref.read(chatProvider.notifier).deleteSession(session.id);
+                  },
+                );
+              },
+            ),
+            const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showRenameDialog(BuildContext context, ChatSession session) {
+    final controller = TextEditingController(text: session.title);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2E2E2E), // Surface elevated
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Rename chat', style: GoogleFonts.inter(color: Colors.white, fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          style: GoogleFonts.inter(color: Colors.white),
+          decoration: InputDecoration(
+             fillColor: const Color(0xFF1E1E1E),
+             filled: true,
+             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+               ref.read(chatProvider.notifier).renameSession(session.id, controller.text.trim());
+               Navigator.pop(context);
+            },
+            child: Text('Save', style: GoogleFonts.inter(color: AppColors.primary)),
+          ),
+        ],
       ),
     );
   }

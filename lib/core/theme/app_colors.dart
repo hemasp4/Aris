@@ -105,8 +105,14 @@ class AppColors {
 
   // === LIGHT THEME ===
   static const Color backgroundLight = Color(0xFFFFFFFF);
-  static const Color surfaceLight = Color(0xFFF5F5F5);
-  static const Color dividerLight = Color(0xFFE0E0E0);
+  static const Color surfaceLight = Color(0xFFF9F9F9);         // Slightly off-white for cards
+  static const Color surfaceElevatedLight = Color(0xFFFFFFFF); // White for dropdowns/modals
+  static const Color dividerLight = Color(0xFFE5E5E5);
+  static const Color textPrimaryLight = Color(0xFF0D0D0D);     // Near black
+  static const Color textSecondaryLight = Color(0xFF6B7280);   // Gray 500
+  static const Color borderLightMode = Color(0xFFE5E5E5);      // Light mode borders
+  static const Color inputBackgroundLight = Color(0xFFFFFFFF); // White input
+  static const Color sidebarBackgroundLight = Color(0xFFF9F9F9); // Light sidebar
 
   // === DIVIDERS ===
   static const Color dividerDark = Color(0xFF2E2E2E);

@@ -23,7 +23,7 @@ dependencies:
   go_router: ^13.2.0
 
   # HTTP & Networking
-  dio: ^5.4.1
+  dio: ^5.9.0
 
   # Local Storage
   hive: ^2.2.3
@@ -54,7 +54,7 @@ dependencies:
   path_provider: ^2.1.2
 
   # Audio Recording & WebSocket
-  record: ^5.2.0
+  record: ^6.1.2
   web_socket_channel: ^2.4.0
   permission_handler: ^11.3.0
 
@@ -62,6 +62,8 @@ dependencies:
   google_sign_in: ^6.2.1
   hugeicons: ^1.1.4
   google_generative_ai: ^0.4.7
+  flutter_dotenv: ^6.0.0
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:
@@ -78,3 +80,4 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/animations/
+    - .env

@@ -42,7 +42,7 @@ const chatGPTDarkTheme = {
   ),
   
   // Keywords (blue)
-  'keyword': TextStyle(color: Color(0xFF569CD6)),
+  'keyword': TextStyle(color: Color(0xFF4EC9B0)),
   'selector-tag': TextStyle(color: Color(0xFF569CD6)),
   'literal': TextStyle(color: Color(0xFF569CD6)),
   'built_in': TextStyle(color: Color(0xFF4EC9B0)),
@@ -73,7 +73,7 @@ const chatGPTDarkTheme = {
   'params': TextStyle(color: Color(0xFF9CDCFE)),
   
   // Numbers (light green)
-  'number': TextStyle(color: Color(0xFFB5CEA8)),
+  'number': TextStyle(color: Color(0xFFF44747)),
   
   // Comments (grey)
   'comment': TextStyle(

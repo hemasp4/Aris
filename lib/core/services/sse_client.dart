@@ -1,12 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-
-import '../constants/api_constants.dart';
-import 'dio_client.dart';
 
 /// SSE (Server-Sent Events) client for real-time streaming
 /// Uses http package for proper streaming on all platforms
@@ -89,7 +84,16 @@ class SSEClient {
               yield SSEEvent(event: eventType, data: json);
             } catch (e) {
               // Raw text data
-              yield SSEEvent(event: 'raw', data: {'content': data});
+              yield SSEEvent(event: 'message', data: {'content': data});
+            }
+          } else if (line.trim().startsWith('{') && line.trim().endsWith('}')) {
+            // Handle raw JSON lines (implicit data)
+            try {
+              final json = jsonDecode(line);
+              final eventType = json['event'] as String? ?? 'message';
+              yield SSEEvent(event: eventType, data: json);
+            } catch (e) {
+              // Ignore invalid JSON lines
             }
           }
         }

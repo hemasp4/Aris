@@ -115,14 +115,21 @@ final routerProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == '/register';
       final isSharedRoute = state.matchedLocation.startsWith('/shared/');
 
-      // Don't redirect while checking initial auth state
-      if (isLoading) {
-        return null;
-      }
-
       // Allow shared routes without auth
       if (isSharedRoute) {
         return null;
+      }
+
+      // During loading/initial state:
+      // - If on auth route, stay there (don't redirect to chat)
+      // - If trying to access protected routes, redirect to login
+      if (isLoading) {
+        if (isAuthRoute) {
+          // Stay on login/register during OAuth flow
+          return null;
+        }
+        // Redirect to login if trying to access protected routes during initial load
+        return '/login';
       }
 
       // Redirect to login if not authenticated and not on auth page

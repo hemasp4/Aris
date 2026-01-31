@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
-import '../../../../core/theme/app_colors.dart';
 
 /// ChatGPT-style group chat options menu
 /// Shows when tapping the user icon in top-right of group chat
@@ -50,7 +49,6 @@ class GroupChatMenu extends StatelessWidget {
     VoidCallback? onDeleteGroup,
     bool isMuted = false,
   }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     showModalBottomSheet(
       context: context,

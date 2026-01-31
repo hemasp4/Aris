@@ -79,10 +79,10 @@ class ModelNotifier extends StateNotifier<ModelState> {
       // Set default model if none selected
       String? selected = state.selectedModel;
       if (selected == null && models.isNotEmpty) {
-        // Prioritize Qwen 2.5 Coder for local development
-        final qwenIndex = models.indexWhere((m) => m.name.contains('qwen2.5-coder'));
-        if (qwenIndex != -1) {
-          selected = models[qwenIndex].name;
+        // Prioritize Cloud Models (gpt-oss)
+        final cloudIndex = models.indexWhere((m) => m.name.contains('gpt-oss'));
+        if (cloudIndex != -1) {
+          selected = models[cloudIndex].name;
         } else {
           selected = models.first.name;
         }

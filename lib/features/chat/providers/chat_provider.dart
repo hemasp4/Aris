@@ -1,13 +1,16 @@
 import 'dart:async';
 
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../../core/constants/api_constants.dart';
 import '../../../core/services/dio_client.dart';
 import '../../../core/services/sse_client.dart';
 import 'model_provider.dart';
+import '../../auth/providers/auth_provider.dart';
 
 /// Chat message model
 class ChatMessage {
@@ -22,8 +25,12 @@ class ChatMessage {
     required this.role,
     required this.content,
     required this.timestamp,
+    required this.timestamp,
     this.isStreaming = false,
+    this.headlines,
   });
+
+  final List<Map<String, dynamic>>? headlines;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
@@ -33,6 +40,9 @@ class ChatMessage {
       timestamp: json['timestamp'] != null 
           ? DateTime.parse(json['timestamp']) 
           : DateTime.now(),
+      headlines: (json['headlines'] as List<dynamic>?)
+          ?.map((e) => Map<String, dynamic>.from(e as Map))
+          .toList(),
     );
   }
 
@@ -44,9 +54,21 @@ class ChatMessage {
       id: id,
       role: role,
       content: content ?? this.content,
+      content: content ?? this.content,
       timestamp: timestamp,
       isStreaming: isStreaming ?? this.isStreaming,
+      headlines: headlines ?? this.headlines,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'role': role,
+      'content': content,
+      'timestamp': timestamp.toIso8601String(),
+      'headlines': headlines,
+    };
   }
 }
 
@@ -166,7 +188,35 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final Ref ref;
 
   ChatNotifier(this.ref) : super(const ChatState()) {
-    loadSessions();
+    // 1. Check initial auth state
+    final authState = ref.read(authProvider);
+    if (authState.status == AuthStatus.authenticated) {
+      loadSessions();
+    }
+
+    // 2. Listen to Auth State changes
+    ref.listen<AuthState>(authProvider, (previous, next) async {
+       // On Login (transition to authenticated)
+       if (next.status == AuthStatus.authenticated && 
+           previous?.status != AuthStatus.authenticated) {
+           print('[ChatNotifier] User authenticated. Loading sessions.');
+           loadSessions(); 
+       }
+       // On Logout (transition to unauthenticated)
+       else if (previous?.status == AuthStatus.authenticated && 
+           next.status == AuthStatus.unauthenticated) {
+           print('[ChatNotifier] User logged out. Clearing cache and state.');
+           await _clearAllCache();
+           state = const ChatState();
+       }
+       // On User Change (e.g. fast switch)
+       else if (previous?.user?.id != next.user?.id && next.user != null) {
+           print('[ChatNotifier] User changed. Clearing cache and reloading.');
+           await _clearAllCache();
+           state = const ChatState(isLoading: true); 
+           loadSessions();
+       }
+    });
   }
 
   final _client = dioClient;
@@ -177,11 +227,43 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final StringBuffer _tokenBuffer = StringBuffer();
   Timer? _updateTimer;
   DateTime? _streamStartTime;
+  
+  /// Clear all Hive caches (Sessions and Messages)
+  Future<void> _clearAllCache() async {
+    try {
+      if (Hive.isBoxOpen('sessions')) {
+        await Hive.box<ChatSession>('sessions').clear();
+      }
+      if (Hive.isBoxOpen('chat_cache')) {
+        await Hive.box('chat_cache').clear();
+      }
+    } catch (e) {
+      print('[ChatNotifier] Cache clear error: $e');
+    }
+  }
 
-  /// Load chat sessions
+  /// Load chat sessions (Local-First: Hive -> API -> Hive)
   Future<void> loadSessions() async {
-    state = state.copyWith(isLoading: true, error: null);
+    // 1. Load from Hive immediately
+    try {
+      final box = Hive.box<ChatSession>('sessions');
+      if (box.isNotEmpty) {
+        final cachedSessions = box.values.toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          
+        state = state.copyWith(
+          sessions: cachedSessions,
+          isLoading: state.sessions.isEmpty, // Only show loading if cache is empty
+        );
+      } else {
+        state = state.copyWith(isLoading: true);
+      }
+    } catch (e) {
+      print('[Chat] Cache load error: $e');
+      state = state.copyWith(isLoading: true);
+    }
     
+    // 2. Fetch from API
     try {
       final response = await _client.dio.get(ApiConstants.chats);
       
@@ -189,15 +271,21 @@ class ChatNotifier extends StateNotifier<ChatState> {
         final List<dynamic> data = response.data['chats'] ?? response.data ?? [];
         final sessions = data.map((json) => ChatSession.fromJson(json)).toList();
         
+        // 3. Update State & Cache
         state = state.copyWith(
           sessions: sessions,
           isLoading: false,
         );
+        
+        final box = Hive.box<ChatSession>('sessions');
+        await box.clear();
+        await box.addAll(sessions);
       }
     } on DioException catch (e) {
+      // If network fails, we still have cache (if loaded)
       state = state.copyWith(
         isLoading: false,
-        error: e.response?.data?['detail'] ?? 'Failed to load chats',
+        error: state.sessions.isEmpty ? (e.response?.data?['detail'] ?? 'Failed to load chats') : null,
       );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -207,6 +295,27 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Set research mode (web_search, deep_research, shopping, or null for normal)
   void setResearchMode(String? mode) {
     state = state.copyWith(researchMode: mode);
+  }
+
+  /// Clear research mode (explicitly set to null)
+  void clearResearchMode() {
+    state = ChatState(
+      sessions: state.sessions,
+      currentSessionId: state.currentSessionId,
+      messages: state.messages,
+      isLoading: state.isLoading,
+      isStreaming: state.isStreaming,
+      error: state.error,
+      isThinking: state.isThinking,
+      isSearching: state.isSearching,
+      isScraping: state.isScraping,
+      scrapingSources: state.scrapingSources,
+      headlines: state.headlines,
+      researchMode: null, // Explicitly clear
+      quotaExceeded: state.quotaExceeded,
+      quotaMessage: state.quotaMessage,
+      quotaResetHours: state.quotaResetHours,
+    );
   }
 
   /// Create new chat session
@@ -232,19 +341,53 @@ class ChatNotifier extends StateNotifier<ChatState> {
     return null;
   }
 
-  /// Load messages for a chat session
+  /// Load messages for a chat session (Local-First)
   Future<void> loadMessages(String sessionId) async {
-    state = state.copyWith(
-      isLoading: true,
-      currentSessionId: sessionId,
-      error: null,
-    );
+    // 1. Load from Hive immediately
+    final boxKey = 'messages_$sessionId';
+    try {
+      // We use a generic box for message lists or open a specific box?
+      // Since we can't dynamic open boxes easily in sync, lets use a Map in 'messages' box or similar.
+      // Better: Store List<ChatMessage> in a 'messages_cache' box keyed by sessionId?
+      // Actually, ChatMessageAdapter is registered. We can store List in a Hive list? No.
+      // Let's use 'messages' box and key them as "$sessionId:$msgId"? No, too slow to query.
+      // Simple approach: One box 'chat_messages', key = sessionId, value = List<ChatMessage>.
+      // But Hive implementation above opened 'messages' as Box<ChatMessage>. That's for individual messages?
+      // Let's assume we open a box <List<dynamic>> for message lists? No.
+      // Let's use simple JSON caching for messages to be safe/fast for now alongside mapped objects?
+      // Actually, let's use the 'messages' box as a Map<String, List<ChatMessage>> (requires registering List adapter which is default?)
+      // Wait, let's keep it simple: Use `Hive.box('chat_cache')` to store the LIST of messages for a session.
+      
+      final cacheBox = Hive.box('chat_cache');
+      final cachedJson = cacheBox.get(boxKey);
+      
+      if (cachedJson != null) {
+        final List<dynamic> decoded = jsonDecode(cachedJson);
+        final cachedMessages = decoded.map((j) => ChatMessage.fromJson(j)).toList();
+        
+        state = state.copyWith(
+          isLoading: false, // Show immediately
+          currentSessionId: sessionId,
+          messages: cachedMessages,
+          error: null,
+        );
+      } else {
+        state = state.copyWith(
+          isLoading: true,
+          currentSessionId: sessionId,
+          error: null,
+        );
+      }
+    } catch (e) {
+      print('[Chat] Message cache load error: $e');
+      state = state.copyWith(isLoading: true, currentSessionId: sessionId);
+    }
     
+    // 2. Fetch from API
     try {
       final response = await _client.dio.get(ApiConstants.chatMessages(sessionId));
       
       if (response.statusCode == 200) {
-        // Backend returns List<MessageResponse> directly, not wrapped in 'messages'
         final List<dynamic> data = response.data is List 
             ? response.data 
             : (response.data['messages'] ?? []);
@@ -254,21 +397,30 @@ class ChatNotifier extends StateNotifier<ChatState> {
           messages: messages,
           isLoading: false,
         );
+        
+        // 3. Parse & Cache
+        // Store as JSON string for simplicity in 'chat_cache' to avoid complex List<Object> adapters
+        final cacheBox = Hive.box('chat_cache');
+        // We need to implement toJson or just cache the raw response data
+        // Let's cache the raw 'data' list as json string
+        await cacheBox.put(boxKey, jsonEncode(data));
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
+        final updatedSessions = state.sessions.where((s) => s.id != sessionId).toList();
         state = state.copyWith(
           isLoading: false, 
           error: 'Chat not found',
           currentSessionId: null,
           messages: [],
+          sessions: updatedSessions,
         );
+        // Clear cache for this chat
+        Hive.box('chat_cache').delete(boxKey);
       } else {
-        // print('Failed to load messages: $e');
         state = state.copyWith(isLoading: false, error: 'Failed to load messages');
       }
     } catch (e) {
-      // print('Failed to load messages: $e');
       state = state.copyWith(isLoading: false, error: 'Failed to load messages');
     }
   }
@@ -330,11 +482,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
     try {
       // Get session ID or create new one
       String? sessionId = state.currentSessionId;
-      if (sessionId == null || sessionId == 'sample-session') {
+      print('[Chat] sendMessage: currentSessionId = $sessionId');
+      
+      if (sessionId == null || sessionId.isEmpty || sessionId == 'sample-session') {
+        print('[Chat] Creating new session...');
         sessionId = await createSession();
+        print('[Chat] New session created: $sessionId');
         if (sessionId == null) {
           throw Exception('Failed to create chat session');
         }
+        
+        // Critical: Update state with new session ID immediately so UI knows we're in a valid chat
+        state = state.copyWith(currentSessionId: sessionId);
+      } else {
+        print('[Chat] Reusing existing session: $sessionId');
       }
 
       // Get selected model
@@ -423,6 +584,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
             );
             break;
             
+          case 'headlines':
+            final headlines = (event.data['headlines'] as List<dynamic>?)
+                ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ?? [];
+            state = state.copyWith(
+              isScraping: false, 
+              isSearching: false,
+              isThinking: false,
+              headlines: headlines,
+            );
+            _attachHeadlinesToStreamingMessage(headlines);
+            break;
+
           case 'scrape_completed':
             final headlines = (event.data['headlines'] as List<dynamic>?)
                 ?.map((e) => Map<String, dynamic>.from(e as Map))
@@ -431,6 +605,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
               isScraping: false,
               headlines: headlines,
             );
+            _attachHeadlinesToStreamingMessage(headlines);
             break;
             
           case 'answer_stream_started':
@@ -491,6 +666,21 @@ class ChatNotifier extends StateNotifier<ChatState> {
     if (lastMessage.isStreaming) {
       messages[lastIndex] = lastMessage.copyWith(
         content: lastMessage.content + content,
+      );
+      state = state.copyWith(messages: messages);
+    }
+  }
+
+  void _attachHeadlinesToStreamingMessage(List<Map<String, dynamic>> headlines) {
+    if (state.messages.isEmpty) return;
+    
+    final messages = List<ChatMessage>.from(state.messages);
+    final lastIndex = messages.length - 1;
+    final lastMessage = messages[lastIndex];
+    
+    if (lastMessage.isStreaming) {
+      messages[lastIndex] = lastMessage.copyWith(
+        headlines: headlines, // Uses the new field we added
       );
       state = state.copyWith(messages: messages);
     }
@@ -777,10 +967,110 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Clear current session
   void clearCurrentSession() {
+    print('[Chat] clearCurrentSession called - resetting currentSessionId to null');
     state = state.copyWith(
       currentSessionId: null,
       messages: [],
     );
+  }
+
+  /// Edit a user message and trigger regeneration of the answer
+  Future<void> editUserMessage(String messageId, String newContent) async {
+    try {
+      // 1. Optimistic Update
+      final index = state.messages.indexWhere((m) => m.id == messageId);
+      if (index == -1) return;
+
+      final updatedMessage = state.messages[index].copyWith(content: newContent);
+      List<ChatMessage> updatedMessages = List.from(state.messages);
+      updatedMessages[index] = updatedMessage;
+      state = state.copyWith(messages: updatedMessages);
+
+      // 2. Call API to update content
+      await _client.dio.put(
+        '/messages/$messageId',
+        data: {'content': newContent},
+      );
+
+      // 3. Find associated assistant response to regenerate
+      if (index + 1 < state.messages.length) {
+        final nextMsg = state.messages[index + 1];
+        if (nextMsg.role == 'assistant') {
+          await regenerateResponse(nextMsg.id);
+        }
+      }
+    } catch (e) {
+      state = state.copyWith(error: 'Failed to edit message');
+    }
+  }
+
+  /// Regenerate an assistant response with TRUE STREAMING
+  Future<void> regenerateResponse(String messageId) async {
+    // 1. Mark as streaming/loading
+    final index = state.messages.indexWhere((m) => m.id == messageId);
+    if (index == -1) return;
+    
+    // Clear content of the assistant message to show thinking state
+    List<ChatMessage> updatedMessages = List.from(state.messages);
+    updatedMessages[index] = updatedMessages[index].copyWith(
+      content: '', // Clear old content
+      isStreaming: true,
+    );
+    state = state.copyWith(messages: updatedMessages, isStreaming: true);
+    
+    _streamStartTime = DateTime.now();
+    _tokenBuffer.clear();
+    _isFirstToken = true;
+
+    try {
+      const storage = FlutterSecureStorage();
+      final authToken = await storage.read(key: StorageKeys.authToken);
+      
+      // 2. Call Streaming Endpoint
+      final url = '${ApiConstants.apiUrl}/chats/messages/$messageId/regenerate_stream';
+      
+      await for (final event in sseClient.stream(
+        url: url,
+        // method: 'POST' removed - hardcoded in SSEClient
+        body: {}, // No body needed, ID is in URL
+        authToken: authToken,
+      )) {
+        switch (event.event) {
+          case 'token':
+             final content = event.data['content']?.toString() ?? '';
+             // Append to the SPECIFIC message being regenerated
+             // We need to find it again in case state changed
+             final currentIndex = state.messages.indexWhere((m) => m.id == messageId);
+             if (currentIndex != -1) {
+                final currentMsgs = List<ChatMessage>.from(state.messages);
+                final msg = currentMsgs[currentIndex];
+                currentMsgs[currentIndex] = msg.copyWith(content: msg.content + content);
+                state = state.copyWith(messages: currentMsgs);
+             }
+             break;
+             
+          case 'answer_completed':
+             state = state.copyWith(isStreaming: false);
+             final currentIndex = state.messages.indexWhere((m) => m.id == messageId);
+             if (currentIndex != -1) {
+                final currentMsgs = List<ChatMessage>.from(state.messages);
+                currentMsgs[currentIndex] = currentMsgs[currentIndex].copyWith(isStreaming: false);
+                state = state.copyWith(messages: currentMsgs);
+             }
+             break;
+             
+          case 'error':
+             state = state.copyWith(error: event.data['error'] ?? 'Regeneration failed', isStreaming: false);
+             break;
+             
+          case 'done':
+             return;
+        }
+      }
+      
+    } catch (e) {
+      state = state.copyWith(isStreaming: false, error: 'Failed to regenerate: $e');
+    }
   }
 
   /// Cancel current streaming response

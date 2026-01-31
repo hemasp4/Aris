@@ -68,6 +68,10 @@ class AuthService {
     required String password,
   }) async {
     try {
+      print('🔐 [AuthService] Attempting login for: $username');
+      print('🔐 [AuthService] Base URL: ${ApiConstants.apiUrl}');
+      print('🔐 [AuthService] Login endpoint: ${ApiConstants.login}');
+      
       final response = await _client.dio.post(
         ApiConstants.login,
         data: {
@@ -86,9 +90,21 @@ class AuthService {
           userId: data['user']?['id'],
         );
 
-        final user = User.fromJson(data['user']);
-        // Save user data locally for persistent login
-        await saveUserToLocal(user);
+        // Try to get user from response, otherwise fetch from /me endpoint
+        User? user;
+        if (data['user'] != null) {
+          user = User.fromJson(data['user']);
+        } else {
+          // Fetch user info from /me endpoint
+          user = await _fetchUserFromServer();
+        }
+        
+        if (user != null) {
+          await saveUserToLocal(user);
+        } else {
+          // Fallback: create user from username
+          user = User(id: '', username: username, email: null);
+        }
 
         return AuthResult(
           success: true,

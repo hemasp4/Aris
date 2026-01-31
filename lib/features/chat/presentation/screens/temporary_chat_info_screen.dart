@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
-import '../../../../core/theme/app_colors.dart';
 
 /// ChatGPT-style Temporary Chat info screen
 class TemporaryChatInfoScreen extends StatelessWidget {

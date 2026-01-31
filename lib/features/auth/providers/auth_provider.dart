@@ -160,6 +160,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return true;
     }
     
+    // If user cancelled, just go back to unauthenticated without showing error
+    if (result.error?.toLowerCase().contains('cancel') == true) {
+      state = state.copyWith(status: AuthStatus.unauthenticated, error: null);
+      return false;
+    }
+    
+    // Only show error for actual failures
     state = state.copyWith(
       status: AuthStatus.error,
       error: result.error,

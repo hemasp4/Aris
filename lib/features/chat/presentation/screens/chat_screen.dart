@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:hugeicons/hugeicons.dart';
 
 import '../../providers/chat_provider.dart';
@@ -21,10 +22,9 @@ import '../widgets/attachment_bottom_sheet.dart';
 import '../widgets/chat_sidebar.dart';
 import '../widgets/group_chat_dialogs.dart';
 import '../widgets/group_chat_modal.dart';
-import '../../../settings/presentation/widgets/profile_edit_modal.dart';
+import '../../../../core/components/custom_modal.dart';
 import '../widgets/group_options_menu.dart';
 import '../widgets/expandable_input_box.dart';
-import '../widgets/report_dialog.dart';
 import '../widgets/fetch_indicator.dart';
 import '../widgets/headline_cards.dart';
 import 'temporary_chat_info_screen.dart';
@@ -52,19 +52,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.chatId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(chatProvider.notifier).loadMessages(widget.chatId!);
-      });
-    }
-    
-
+    // Load sessions if not already loaded (fixes lazy loading)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+       // Optimize: Load sessions and messages in parallel
+       final sessionFuture = ref.read(chatProvider.notifier).loadSessions();
+       final messageFuture = widget.chatId != null 
+           ? ref.read(chatProvider.notifier).loadMessages(widget.chatId!)
+           : Future.value();
+           
+       Future.wait([sessionFuture, messageFuture]);
+    });
     
     _scrollController.addListener(_onScroll);
-    _messageController.addListener(() => setState(() {}));
+    _messageController.addListener(() {
+      // Clear suggestion category when input is emptied
+      if (_messageController.text.isEmpty && _selectedSuggestionCategory != null) {
+        _selectedSuggestionCategory = null;
+      }
+      setState(() {});
+    });
   }
 
   bool _isVoiceConverted = false;
+  String _textBeforeVoice = ''; // For appending voice text
 
   void _onScroll() {
     if (_scrollController.hasClients) {
@@ -116,30 +126,64 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _handleVoiceTap() async {
+    print('[UI] _handleVoiceTap triggered');
     final voiceNotifier = ref.read(voiceInputProvider.notifier);
     final currentState = ref.read(voiceInputProvider).state;
+    print('[UI] Current Voice State: $currentState');
     
     if (currentState == VoiceInputState.idle) {
-      setState(() => _isVoiceConverted = false);
+      setState(() {
+        _isVoiceConverted = false;
+        _textBeforeVoice = _messageController.text; // Capture existing text
+      });
+      print('[UI] Starting recording... appending to: $_textBeforeVoice');
+      
+      // DO NOT CLEAR controller for append mode
+      // _messageController.clear();
+      
       await voiceNotifier.startRecording();
     } else if (currentState == VoiceInputState.listening) {
       // Manual stop -> Stop streaming.
       // The text is already updated in real-time via the listener.
+      print('[UI] Stopping recording (manual)...');
       await voiceNotifier.stopRecording();
+    } else {
+       print('[UI] Unhandled state tap: $currentState');
     }
   }
 
   void _handleVoiceStopAndSend() async {
     final voiceNotifier = ref.read(voiceInputProvider.notifier);
+    final currentVoiceState = ref.read(voiceInputProvider);
     
     // Stop recording if active
-    if (ref.read(voiceInputProvider).state == VoiceInputState.listening) {
-      await voiceNotifier.stopRecording();
-    }
-    
-    // Send immediately if we have text
-    if (_messageController.text.isNotEmpty) {
-      _sendMessage();
+    if (currentVoiceState.state == VoiceInputState.listening ||
+        currentVoiceState.state == VoiceInputState.thinking ||
+        currentVoiceState.state == VoiceInputState.finalizing) {
+      
+      // stopRecording() sends commit and waits for final text
+      final finalText = await voiceNotifier.stopRecording();
+      
+      // Insert the final transcribed text into the input field
+      if (finalText != null && finalText.isNotEmpty) {
+        // FIXED: Append to existing text rather than replacing
+        final prefix = _textBeforeVoice;
+        final separator = (prefix.isNotEmpty && !prefix.endsWith(' ') && finalText.isNotEmpty) ? ' ' : '';
+        final combinedText = '$prefix$separator$finalText';
+        
+        _messageController.text = combinedText;
+        _messageController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _messageController.text.length),
+        );
+        
+        // Auto-send like ChatGPT (DISABLED to allow Redo/Review)
+        // _sendMessage(); 
+        
+        setState(() {
+          _isVoiceConverted = true; // Set to true to show Redo button
+        });
+      }
+      // If no text detected, the UI will show "No speech detected" inside the floating card
     }
   }
 
@@ -266,32 +310,57 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ref.listen(voiceInputProvider, (previous, current) {
       // 1. Handle Partial & Final Text Updates
       if (current.transcribedText != null) {
-        // Update text field in real-time
-        if (_messageController.text != current.transcribedText) {
-          _messageController.text = current.transcribedText!;
-           // Move cursor to end
+        // Append to existing text rather than replacing
+        final prefix = _textBeforeVoice; // Captured when mic started
+        final newVoiceText = current.transcribedText!;
+        final separator = (prefix.isNotEmpty && !prefix.endsWith(' ') && newVoiceText.isNotEmpty) ? ' ' : '';
+        
+        final combinedText = '$prefix$separator$newVoiceText';
+        
+        if (_messageController.text != combinedText) {
+          _messageController.text = combinedText;
           _messageController.selection = TextSelection.fromPosition(
             TextPosition(offset: _messageController.text.length),
           );
         }
       }
 
-      // 2. Handle Auto-Submit (Final State)
-      // If state transitions to 'transcribing' (which we mapped to 'Final' in provider), auto-send
+      // 2. Handle Auto-Submit (Final State) - DISABLED per Master Prompt
+      // "User must explicitly press Send."
+      // We only update the text field (handled above) and reset state if needed.
+      
+      // Case A: Manual Stop (Transitions to transcribing)
       if (current.state == VoiceInputState.transcribing && 
           previous?.state != VoiceInputState.transcribing) {
-           // Wait a brief moment to ensure text is set, then send
-           if (_messageController.text.isNotEmpty) {
-             _sendMessage();
-             // Reset voice state after send
-             ref.read(voiceInputProvider.notifier).reset();
-           }
+           // Do nothing, wait for final text in _handleVoiceStopAndSend or listener updates
+      }
+      
+      // Case B: Auto-Close (Server detected silence -> IDLE)
+      if (current.state == VoiceInputState.idle && 
+          (previous?.state == VoiceInputState.listening || 
+           previous?.state == VoiceInputState.thinking || 
+           previous?.state == VoiceInputState.transcribing ||
+           previous?.state == VoiceInputState.finalizing)) {
+            // Ensure final text is captured
+            if (current.transcribedText != null && current.transcribedText!.isNotEmpty) {
+                final prefix = _textBeforeVoice;
+                final newVoiceText = current.transcribedText!;
+                final separator = (prefix.isNotEmpty && !prefix.endsWith(' ') && newVoiceText.isNotEmpty) ? ' ' : '';
+                final combinedText = '$prefix$separator$newVoiceText';
+                
+               if (_messageController.text != combinedText) {
+                 _messageController.text = combinedText;
+               }
+            }
       }
     });
 
     // Listen for chat errors (e.g. Quota exceeded)
     ref.listen(chatProvider, (previous, next) {
-      if (next.error != null && next.error != previous?.error) {
+      // Ignore 'Chat not found' as it's handled by other listener (redirect)
+      if (next.error != null && 
+          next.error != previous?.error && 
+          next.error != 'Chat not found') {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(next.error!.contains('429') 
@@ -351,32 +420,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 );
                               },
                             ),
-                            // ChatGPT-style headline cards (scraped sources with images)
-                            Consumer(
-                              builder: (context, ref, _) {
-                                final headlines = ref.watch(chatProvider).headlines;
-                                if (headlines.isEmpty) return const SizedBox.shrink();
-                                
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: HeadlineCards(
-                                    headlines: headlines.map((h) => HeadlineData(
-                                      title: h['title']?.toString() ?? '',
-                                      source: h['source']?.toString() ?? h['domain']?.toString() ?? '',
-                                      url: h['url']?.toString(),
-                                      imageUrl: h['image_url']?.toString(),
-                                      sourceIconUrl: h['favicon_url']?.toString(),
-                                    )).toList(),
-                                    onTap: (headline) {
-                                      // TODO: Open URL in browser
-                                      if (headline.url != null) {
-                                        // Open URL
-                                      }
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
+                            // ChatGPT-style headline cards (Moved to MessageBubble)
+                            const SizedBox.shrink(),
                             // Message list or empty state
                             Expanded(
                               child: messages.isEmpty
@@ -505,10 +550,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              // Match vertical height to approx 44px
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -565,12 +611,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36,
-        height: 36,
-        padding: const EdgeInsets.all(8), // Added padding for better tap area
+        // Match right side pill height (36 + 4+4 = 44)
+        height: 44, 
+        width: 44,
+        padding: const EdgeInsets.all(4), 
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(24), // Match right side radius
         ),
         child: Center(
           child: HugeIcon(
@@ -751,41 +798,64 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
             Consumer(
               builder: (context, ref, _) {
-                final chatState = ref.watch(chatProvider);
-                final sessions = ref.watch(chatSessionsProvider);
-                final currentSession = sessions.where((s) => s.id == chatState.currentSessionId).firstOrNull;
-                final isPinned = currentSession?.isPinned ?? false;
-                final isArchived = currentSession?.isArchived ?? false;
                 
                 return Column(
                   children: [
-                     ListTile(
-                      leading: HugeIcon(
-                        icon: isPinned ? HugeIcons.strokeRoundedPinOff : HugeIcons.strokeRoundedPin,
-                        color: AppColors.textPrimary,
-                        size: 24,
-                      ),
-                      title: Text(isPinned ? 'Unpin chat' : 'Pin chat', style: const TextStyle(color: AppColors.textPrimary)),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _handleMenuAction('pin');
-                      },
-                    ),
+                     const Divider(color: AppColors.dividerDark, height: 1),
+                    
+                    // Clear Chat
                     ListTile(
                       leading: HugeIcon(
-                        icon: isArchived ? HugeIcons.strokeRoundedArchive02 : HugeIcons.strokeRoundedArchive,
+                        icon: HugeIcons.strokeRoundedClean,
                         color: AppColors.textPrimary,
                         size: 24,
                       ),
-                      title: Text(isArchived ? 'Unarchive' : 'Archive', style: const TextStyle(color: AppColors.textPrimary)),
+                      title: const Text('Clear chat', style: TextStyle(color: AppColors.textPrimary)),
                       onTap: () {
                         Navigator.pop(context);
-                        _handleMenuAction('archive');
+                         CustomModal.show(
+                          context,
+                          title: 'Clear this chat?',
+                          content: 'This will remove all messages in this conversation.',
+                          confirmLabel: 'Clear',
+                          isDestructive: true,
+                          onConfirm: () {
+                             ref.read(chatProvider.notifier).clearCurrentSession();
+                          },
+                        );
                       },
                     ),
+
+                    // Delete Chat
+                    ListTile(
+                      leading: HugeIcon(
+                        icon: HugeIcons.strokeRoundedDelete02,
+                        color: AppColors.danger,
+                        size: 24,
+                      ),
+                      title: const Text('Delete chat', style: TextStyle(color: AppColors.danger)),
+                      onTap: () {
+                        Navigator.pop(context);
+                        CustomModal.show(
+                          context,
+                          title: 'Delete this chat?',
+                          content: 'This cannot be undone.',
+                          confirmLabel: 'Delete',
+                          isDestructive: true,
+                          onConfirm: () {
+                             final chatId = ref.read(chatProvider).currentSessionId;
+                             if (chatId != null) {
+                               ref.read(chatProvider.notifier).deleteSession(chatId);
+                               context.go('/chat');
+                             }
+                          },
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
                   ],
                 );
-              }
+              },
             ),
             ListTile(
               leading: Icon(Icons.settings_outlined, color: AppColors.textPrimary),
@@ -856,68 +926,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           }
         }
         break;
-      case 'archive':
-        if (sessionId != null) {
-          ref.read(chatProvider.notifier).toggleArchiveSession(sessionId);
-        }
-        break;
-      case 'pin':
-        if (sessionId != null) {
-          ref.read(chatProvider.notifier).togglePinSession(sessionId);
-        }
-        break;
-      case 'delete':
-        _showDeleteConfirmation();
-        break;
-      case 'report':
-        _showReportDialog();
-        break;
     }
   }
-  
+
   /// Show delete confirmation dialog
   void _showDeleteConfirmation() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Delete chat?',
-          style: TextStyle(color: AppColors.textPrimary),
-        ),
-        content: const Text(
-          'This action cannot be undone.',
-          style: TextStyle(color: AppColors.textSecondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final sessionId = ref.read(chatProvider).currentSessionId;
-              if (sessionId != null) {
-                ref.read(chatProvider.notifier).deleteSession(sessionId);
-                context.go('/chat');
-              }
-            },
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: AppColors.error),
-            ),
-          ),
-        ],
-      ),
+    CustomModal.show(
+      context,
+      title: 'Delete chat?',
+      content: 'This will permanently delete this conversation.',
+      confirmLabel: 'Delete',
+      isDestructive: true,
+      onConfirm: () {
+        final sessionId = ref.read(chatProvider).currentSessionId;
+        if (sessionId != null) {
+          ref.read(chatProvider.notifier).deleteSession(sessionId);
+          context.go('/chat');
+        }
+      },
     );
-  }
-  
-  /// Show report dialog
-  /// Show report dialog
-  void _showReportDialog() {
-    ReportDialog.show(context);
   }
 
 
@@ -961,7 +988,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         // Toggle mute
       },
       onReport: () {
-        _showReportDialog();
+        // Report dialog removed
       },
       onLeave: () {
         // Confirm leave
@@ -1256,7 +1283,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Widget _buildInputArea(BuildContext context, bool isStreaming, VoiceInputState voiceState) {
-    final isListening = voiceState == VoiceInputState.listening;
+    // Voice mode should stay active during ALL processing states
+    final isListening = voiceState == VoiceInputState.listening ||
+                        voiceState == VoiceInputState.thinking ||
+                        voiceState == VoiceInputState.finalizing ||
+                        voiceState == VoiceInputState.transcribing ||
+                        voiceState == VoiceInputState.noSpeech;
     
     final chatState = ref.watch(chatProvider);
     
@@ -1314,7 +1346,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           onClearResearchMode: () {
             // Cancel ongoing search and clear research mode
             ref.read(chatProvider.notifier).cancelSearch();
-            ref.read(chatProvider.notifier).setResearchMode(null);
+            ref.read(chatProvider.notifier).clearResearchMode();
           },
           onRemoveImage: (file) {
             // TODO: Implement image removal

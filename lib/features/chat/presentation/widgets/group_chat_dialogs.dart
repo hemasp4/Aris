@@ -129,9 +129,6 @@ Future<bool> showStartGroupChatDialog(BuildContext context) async {
 
 /// Show the group link dialog - Responsive design
 Future<void> showGroupLinkDialog(BuildContext context, String link) async {
-  final screenWidth = MediaQuery.of(context).size.width;
-  final isSmallScreen = screenWidth < 400;
-  
   await showDialog(
     context: context,
     builder: (context) => Dialog(

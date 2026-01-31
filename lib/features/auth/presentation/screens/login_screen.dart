@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:hugeicons/hugeicons.dart';
 
+import '../../../../core/constants/api_constants.dart';
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/dio_client.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../providers/auth_provider.dart';
 
@@ -26,11 +31,22 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   bool _biometricsAvailable = false;
+  String _serverUrl = ApiConstants.baseUrl;
+  final _secureStorage = const FlutterSecureStorage();
 
   @override
   void initState() {
     super.initState();
     _checkBiometrics();
+    _loadServerUrl();
+  }
+
+  Future<void> _loadServerUrl() async {
+    final storedUrl = await _secureStorage.read(key: StorageKeys.baseUrl);
+    if (storedUrl != null && storedUrl.isNotEmpty) {
+      setState(() => _serverUrl = storedUrl);
+      ApiConstants.setBaseUrl(storedUrl);
+    }
   }
 
   Future<void> _checkBiometrics() async {
@@ -193,22 +209,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _doLogin(String email, String password) async {
     Navigator.pop(context); // Close the password dialog
     
-    final success = await ref.read(authProvider.notifier).login(
+    // Auth provider will trigger router redirect automatically on success
+    await ref.read(authProvider.notifier).login(
       username: email,
       password: password,
     );
-    
-    if (success && mounted) {
-      context.go('/chat');
-    }
   }
 
   Future<void> _signInWithGoogle() async {
-    final success = await ref.read(authProvider.notifier).loginWithGoogle();
-    
-    if (success && mounted) {
-      context.go('/chat');
-    }
+    // Auth provider will trigger router redirect automatically on success
+    await ref.read(authProvider.notifier).loginWithGoogle();
   }
 
   void _continueWithPhone() {
@@ -245,24 +255,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Top bar with back button
+            // Top bar with back button and server settings
             Padding(
               padding: const EdgeInsets.all(8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: IconButton(
-                  icon: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceElevated,
-                      shape: BoxShape.circle,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    icon: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceElevated,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_back, color: AppColors.textPrimary, size: 20),
                     ),
-                    child: const Icon(Icons.arrow_back, color: AppColors.textPrimary, size: 20),
+                    onPressed: () => context.canPop() ? context.pop() : null,
+                    padding: EdgeInsets.zero,
                   ),
-                  onPressed: () => context.canPop() ? context.pop() : null,
-                  padding: EdgeInsets.zero,
-                ),
+                  // Server settings button
+                  IconButton(
+                    icon: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceElevated,
+                        shape: BoxShape.circle,
+                      ),
+                      child: HugeIcon(
+                        icon: HugeIcons.strokeRoundedSettings02,
+                        color: AppColors.textPrimary,
+                        size: 18,
+                      ),
+                    ),
+                    onPressed: () => _showServerUrlDialog(),
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Server Settings',
+                  ),
+                ],
               ),
             ).animate().fadeIn(duration: 200.ms),
             
@@ -463,15 +494,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           decoration: const BoxDecoration(
                             color: Colors.transparent,
                           ),
-                          child: Image.network(
-                            'https://www.google.com/favicon.ico',
-                            width: 20,
-                            height: 20,
-                            errorBuilder: (_, __, ___) => const Icon(
-                              Icons.g_mobiledata,
-                              size: 24,
-                              color: AppColors.textPrimary,
-                            ),
+                          child: const Icon(
+                            Icons.g_mobiledata,
+                            size: 24,
+                            color: AppColors.textPrimary,
                           ),
                         ),
                         label: Text(
@@ -523,7 +549,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ).animate().fadeIn(delay: 550.ms),
                     
-                    // Biometrics option if available
                     if (_biometricsAvailable) ...[
                       const SizedBox(height: 12),
                       SizedBox(
@@ -551,7 +576,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ).animate().fadeIn(delay: 600.ms),
                     ],
                     
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 24),
+
+                    // Sign up link
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "Don't have an account? ",
+                          style: TextStyle(color: AppColors.textMuted),
+                        ),
+                        TextButton(
+                          onPressed: () => context.push('/register'),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            'Sign up',
+                            style: GoogleFonts.inter(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ).animate().fadeIn(delay: 620.ms),
+                    
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
@@ -607,6 +660,151 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _showServerUrlDialog() {
+    final controller = TextEditingController(text: _serverUrl);
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surfaceDark,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              HugeIcon(
+                icon: HugeIcons.strokeRoundedCloud,
+                color: AppColors.primary,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Server URL',
+                style: GoogleFonts.inter(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Enter your backend server URL to connect.',
+                  style: GoogleFonts.inter(
+                    color: AppColors.textMuted,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  style: GoogleFonts.inter(color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    labelText: 'Server URL',
+                    labelStyle: GoogleFonts.inter(color: AppColors.textMuted),
+                    hintText: 'http://192.168.1.100:8000',
+                    hintStyle: GoogleFonts.inter(color: AppColors.textMuted.withValues(alpha: 0.5)),
+                    filled: true,
+                    fillColor: AppColors.inputBackground,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    prefixIcon: HugeIcon(
+                      icon: HugeIcons.strokeRoundedLink01,
+                      color: AppColors.textMuted,
+                      size: 20,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Quick preset buttons
+                Text(
+                  'Quick presets:',
+                  style: GoogleFonts.inter(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildPresetChip('Localhost', 'http://localhost:8000', controller, setDialogState),
+                    _buildPresetChip('Android Emu', 'http://10.0.2.2:8000', controller, setDialogState),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.inter(color: AppColors.textMuted),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final url = controller.text.trim();
+                if (url.isNotEmpty) {
+                  // Update Dio client AND save to storage
+                  // This ensures immediate effect without restart
+                  await dioClient.setAndStoreBaseUrl(url);
+                  
+                  setState(() => _serverUrl = url);
+                  
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(this.context).showSnackBar(
+                      SnackBar(
+                        content: Text('Server URL updated to: $url'),
+                        backgroundColor: AppColors.primary,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text(
+                'Save',
+                style: GoogleFonts.inter(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPresetChip(String label, String url, TextEditingController controller, StateSetter setDialogState) {
+    return ActionChip(
+      label: Text(
+        label,
+        style: GoogleFonts.inter(
+          color: AppColors.textPrimary,
+          fontSize: 12,
+        ),
+      ),
+      backgroundColor: AppColors.surfaceElevated,
+      side: BorderSide(color: AppColors.borderLight),
+      onPressed: () {
+        controller.text = url;
+        setDialogState(() {});
+      },
     );
   }
 }

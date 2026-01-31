@@ -240,7 +240,7 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton>
         Icons.mic,
         color: widget.enabled
             ? theme.colorScheme.onSurface
-            : theme.colorScheme.onSurface.withOpacity(0.3),
+            : theme.colorScheme.onSurface.withValues(alpha: 0.3),
       ),
       onPressed: widget.enabled ? _startRecording : null,
       tooltip: 'Voice input',

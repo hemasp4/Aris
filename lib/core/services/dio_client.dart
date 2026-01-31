@@ -18,7 +18,7 @@ class DioClient {
     _dio = Dio(
       BaseOptions(
         baseUrl: ApiConstants.apiUrl,
-        connectTimeout: const Duration(seconds: 30),
+        connectTimeout: const Duration(seconds: 60),
         receiveTimeout: const Duration(minutes: 5), // Increased for streaming/scraping
         headers: {
           'Content-Type': 'application/json',
@@ -49,8 +49,12 @@ class DioClient {
   /// Load custom base URL from storage
   Future<void> loadStoredBaseUrl() async {
     final storedUrl = await _secureStorage.read(key: StorageKeys.baseUrl);
+    print('🔧 [DioClient] Loading stored URL: $storedUrl');
     if (storedUrl != null && storedUrl.isNotEmpty) {
       updateBaseUrl(storedUrl);
+      print('🔧 [DioClient] Updated base URL to: ${ApiConstants.apiUrl}');
+    } else {
+      print('🔧 [DioClient] No stored URL, using default: ${ApiConstants.apiUrl}');
     }
   }
 
@@ -110,7 +114,14 @@ class DioClient {
         handler.next(response);
       },
       onError: (error, handler) {
-        print('❌ ${error.response?.statusCode} ${error.requestOptions.path}: ${error.message}');
+        // Suppress 404 logs as they are often expected (e.g., checking if chat exists)
+        // Suppress 404 logs as they are expected when checking for sessions
+        if (error.response?.statusCode != 404) {
+             print('❌ ${error.response?.statusCode} ${error.requestOptions.path}: ${error.message}');
+        } else {
+             // Optional: Minimal log for 404 to confirm it's being handled
+             // print('ℹ️ 404 (Not Found) - Handled: ${error.requestOptions.path}');
+        }
         handler.next(error);
       },
     );

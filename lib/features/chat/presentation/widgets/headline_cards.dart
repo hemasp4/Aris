@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import '../../../../core/theme/app_colors.dart';
+import 'package:hugeicons/hugeicons.dart';
+
+import 'article_preview_sheet.dart';
 
 /// Model for a headline card
 class HeadlineData {
@@ -10,6 +12,7 @@ class HeadlineData {
   final String? sourceIconUrl;
   final String? date;
   final String? url;
+  final String? snippet;
 
   const HeadlineData({
     required this.title,
@@ -18,239 +21,273 @@ class HeadlineData {
     this.sourceIconUrl,
     this.date,
     this.url,
+    this.snippet,
   });
 }
 
-/// ChatGPT-style responsive grid headline cards
-/// Shows 2 columns on mobile, 3 on tablet/desktop
-/// Cards display: Image → Favicon+Source → Title → Date
+/// ChatGPT-EXACT Horizontal Scrolling Headline Cards
+/// Matches the reference images:
+/// - Horizontal scroll with snap behavior
+/// - Card: Image top (120dp) + Source badge + Title (2 lines) + Date
+/// - Dark theme styling with proper shadows
 class HeadlineCards extends StatelessWidget {
   final List<HeadlineData> headlines;
   final Function(HeadlineData)? onTap;
-  final int maxCards; // Limit displayed cards
+  final int maxCards;
+  final EdgeInsetsGeometry? padding;
 
   const HeadlineCards({
     super.key,
     required this.headlines,
     this.onTap,
-    this.maxCards = 6, // Default show 6 cards
+    this.maxCards = 10,
+    this.padding,
   });
 
   @override
   Widget build(BuildContext context) {
     if (headlines.isEmpty) return const SizedBox.shrink();
 
-    // Limit to maxCards
     final displayHeadlines = headlines.take(maxCards).toList();
-    
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Responsive columns: 2 on mobile (<600), 3 on tablet/desktop
-        final columns = constraints.maxWidth < 600 ? 2 : 3;
-        final cardWidth = (constraints.maxWidth - (columns - 1) * 12 - 32) / columns;
-        final cardHeight = cardWidth * 1.1; // Aspect ratio ~1.1
-        
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: displayHeadlines.map((headline) => SizedBox(
-              width: cardWidth,
-              height: cardHeight,
-              child: _HeadlineCard(
-                headline: headline,
-                onTap: () => onTap?.call(headline),
-              ),
-            )).toList(),
-          ),
-        );
-      },
+
+    return SizedBox(
+      height: 220, // Fixed height for horizontal scroll cards
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: padding ?? const EdgeInsets.symmetric(horizontal: 16),
+        physics: const BouncingScrollPhysics(),
+        itemCount: displayHeadlines.length,
+        itemBuilder: (context, index) {
+          return Padding(
+            padding: EdgeInsets.only(
+              right: index < displayHeadlines.length - 1 ? 12 : 0,
+            ),
+            child: _ChatGPTHeadlineCard(
+              headline: displayHeadlines[index],
+              onTap: () => onTap?.call(displayHeadlines[index]),
+            ),
+          );
+        },
+      ),
     );
   }
 }
 
-class _HeadlineCard extends StatelessWidget {
+/// Individual ChatGPT-style headline card
+class _ChatGPTHeadlineCard extends StatefulWidget {
   final HeadlineData headline;
   final VoidCallback? onTap;
 
-  const _HeadlineCard({
+  const _ChatGPTHeadlineCard({
     required this.headline,
     this.onTap,
   });
+
+  @override
+  State<_ChatGPTHeadlineCard> createState() => _ChatGPTHeadlineCardState();
+}
+
+class _ChatGPTHeadlineCardState extends State<_ChatGPTHeadlineCard> {
+  bool _isPressed = false;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        // No fixed width - parent controls size via SizedBox
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? const Color(0xFF2E2E2E) : const Color(0xFFE5E5E5),
-            width: 0.5,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // Image takes ~55% of card height
-            final imageHeight = constraints.maxHeight * 0.55;
-            
-            return Column(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _isPressed ? 0.98 : 1.0,
+        duration: const Duration(milliseconds: 100),
+        child: AnimatedOpacity(
+          opacity: _isPressed ? 0.9 : 1.0,
+          duration: const Duration(milliseconds: 100),
+          child: Container(
+            width: 200, // Card width for horizontal scroll
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1A1A1A) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark 
+                    ? const Color(0xFF2E2E2E) 
+                    : const Color(0xFFE5E5E5),
+                width: 0.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Image
-                if (headline.imageUrl != null)
-                  SizedBox(
-                    height: imageHeight,
-                    width: double.infinity,
-                    child: CachedNetworkImage(
-                      imageUrl: headline.imageUrl!,
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => Container(
-                        color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                        child: const Center(
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      ),
-                      errorWidget: (context, url, error) => Container(
-                        color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                        child: Icon(
-                          Icons.image_not_supported_outlined,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    height: imageHeight,
-                    color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF0F0F0),
-                    child: Center(
-                      child: Icon(
-                        Icons.article_outlined,
-                        color: Colors.grey[600],
-                        size: 28,
-                      ),
-                    ),
-                  ),
-
-            // Content
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Source row
-                    Row(
+                // Image (120dp height)
+                _buildImage(isDark),
+                
+                // Content area
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (headline.sourceIconUrl != null)
-                          Container(
-                            width: 16,
-                            height: 16,
-                            margin: const EdgeInsets.only(right: 6),
-                            child: CachedNetworkImage(
-                              imageUrl: headline.sourceIconUrl!,
-                              fit: BoxFit.contain,
-                              errorWidget: (context, url, error) =>
-                                  _buildSourceIcon(headline.source, isDark),
-                            ),
-                          )
-                        else
-                          _buildSourceIcon(headline.source, isDark),
-                        const SizedBox(width: 6),
+                        // Source row with icon badge
+                        _buildSourceBadge(isDark),
+                        const SizedBox(height: 8),
+                        
+                        // Title (2 lines max)
                         Expanded(
                           child: Text(
-                            headline.source,
+                            widget.headline.title,
                             style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black87,
+                              height: 1.3,
                             ),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        
+                        // Date
+                        if (widget.headline.date != null)
+                          Text(
+                            widget.headline.date!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                            ),
+                          )
+                        else
+                          Text(
+                            'Yesterday', // Default fallback
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[500],
+                            ),
+                          ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    // Title
-                    Expanded(
-                      child: Text(
-                        headline.title,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.black87,
-                          height: 1.3,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    // Date
-                    if (headline.date != null)
-                      Text(
-                        headline.date!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[500],
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
               ],
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSourceIcon(String source, bool isDark) {
-    // Get first letter of source
-    final letter = source.isNotEmpty ? source[0].toUpperCase() : '?';
-    
-    // Generate color based on source name
+  Widget _buildImage(bool isDark) {
+    if (widget.headline.imageUrl != null && 
+        widget.headline.imageUrl!.isNotEmpty) {
+      return SizedBox(
+        height: 120,
+        width: double.infinity,
+        child: CachedNetworkImage(
+          imageUrl: widget.headline.imageUrl!,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => _buildImagePlaceholder(isDark),
+          errorWidget: (context, url, error) => _buildImagePlaceholder(isDark),
+        ),
+      );
+    }
+    return _buildImagePlaceholder(isDark);
+  }
+
+  Widget _buildImagePlaceholder(bool isDark) {
+    // Generate gradient color based on source name
     final colors = [
+      [const Color(0xFF667EEA), const Color(0xFF764BA2)],
+      [const Color(0xFFF093FB), const Color(0xFFF5576C)],
+      [const Color(0xFF4FACFE), const Color(0xFF00F2FE)],
+      [const Color(0xFF43E97B), const Color(0xFF38F9D7)],
+      [const Color(0xFFFA709A), const Color(0xFFFEE140)],
+    ];
+    final colorIndex = widget.headline.source.hashCode.abs() % colors.length;
+    
+    return Container(
+      height: 120,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors[colorIndex],
+        ),
+      ),
+      child: Center(
+        child: HugeIcon(
+          icon: HugeIcons.strokeRoundedNews,
+          color: Colors.white.withValues(alpha: 0.8),
+          size: 36,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourceBadge(bool isDark) {
+    // Generate badge color based on source
+    final badgeColors = [
       Colors.red,
       Colors.blue,
       Colors.green,
       Colors.orange,
       Colors.purple,
       Colors.teal,
+      Colors.pink,
+      Colors.indigo,
     ];
-    final colorIndex = source.hashCode.abs() % colors.length;
+    final colorIndex = widget.headline.source.hashCode.abs() % badgeColors.length;
+    final letter = widget.headline.source.isNotEmpty 
+        ? widget.headline.source[0].toUpperCase() 
+        : '?';
     
-    return Container(
-      width: 16,
-      height: 16,
-      decoration: BoxDecoration(
-        color: colors[colorIndex],
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Center(
-        child: Text(
-          letter,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
+    return Row(
+      children: [
+        // Icon badge (letter-based fallback - no CORS issues)
+        Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: badgeColors[colorIndex],
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Center(
+            child: Text(
+              letter,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ),
-      ),
+        const SizedBox(width: 6),
+        
+        // Source name
+        Expanded(
+          child: Text(
+            widget.headline.source,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[isDark ? 400 : 600],
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -270,20 +307,56 @@ class SourceBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
+    // Generate badge color
+    final badgeColors = [
+      Colors.red,
+      Colors.blue,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.teal,
+    ];
+    final colorIndex = source.hashCode.abs() % badgeColors.length;
+    final letter = source.isNotEmpty ? source[0].toUpperCase() : '?';
+    
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       margin: const EdgeInsets.only(left: 4),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFE8E8E8),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(
-        source,
-        style: TextStyle(
-          fontSize: 11,
-          color: isDark ? Colors.grey[400] : Colors.grey[700],
-          fontWeight: FontWeight.w500,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: badgeColors[colorIndex],
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: Center(
+              child: Text(
+                letter,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            source,
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.grey[400] : Colors.grey[700],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

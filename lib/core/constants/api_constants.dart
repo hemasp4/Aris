@@ -1,12 +1,14 @@
 /// API configuration constants
 /// Supports: Windows (localhost), Android Emulator (10.0.2.2), Ngrok tunnels
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class ApiConstants {
   ApiConstants._();
 
   // Base URL - Using localhost for same-machine development
   // For mobile/cross-platform: use ngrok URL
   // For web on same machine: use localhost
-  static String _baseUrl = 'http://localhost:8000';
+  static String _baseUrl = dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000';
   
   static String get baseUrl => _baseUrl;
   static String get apiVersion => '/api/v1';

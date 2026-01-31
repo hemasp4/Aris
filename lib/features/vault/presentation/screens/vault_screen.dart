@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -36,16 +37,26 @@ class _VaultScreenState extends ConsumerState<VaultScreen> {
   Future<void> _checkStatus() async {
     setState(() => _isLoading = true);
     
-    final status = await vaultService.getStatus();
-    final canBio = await _localAuth.canCheckBiometrics;
+    final status = await vaultService.getStatus(); // Keep this line to get status
     
-    setState(() {
-      _status = status;
-      _isUnlocked = status.unlocked;
-      _canUseBiometrics = canBio;
-      _isLoading = false;
-    });
-    
+    if (mounted) {
+      // Skip biometric check on web to avoid MissingPluginException
+      bool canCheck = false;
+      try {
+        if (!kIsWeb) {
+            final auth = LocalAuthentication();
+            canCheck = await auth.canCheckBiometrics && await auth.isDeviceSupported();
+        }
+      } catch (_) {}
+
+      setState(() {
+        _status = status; // Keep this to update _status
+        _isLoading = false;
+        _isUnlocked = status.unlocked;
+        // _hasPin is covered by _status.hasPin
+        _canUseBiometrics = canCheck;
+      });
+    }
     if (_isUnlocked) {
       await _loadItems();
     }
