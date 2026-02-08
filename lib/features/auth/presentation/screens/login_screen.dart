@@ -762,9 +762,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // This ensures immediate effect without restart
                   await dioClient.setAndStoreBaseUrl(url);
                   
-                  setState(() => _serverUrl = url);
-                  
                   if (mounted) {
+                    setState(() => _serverUrl = url);
                     Navigator.pop(context);
                     ScaffoldMessenger.of(this.context).showSnackBar(
                       SnackBar(

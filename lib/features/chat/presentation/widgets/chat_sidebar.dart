@@ -117,7 +117,9 @@ class _ChatSidebarState extends ConsumerState<ChatSidebar> {
             
             const SizedBox(height: 8),
             
-            // New chat item
+            const SizedBox(height: 8),
+            
+            // New chat item (Removed to avoid redundancy with Header button)
             _buildNewChatItem(),
             
             const SizedBox(height: 8),

@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../../core/constants/api_constants.dart';
+import 'shimmer_loading.dart';
 
-import 'article_preview_sheet.dart';
+/// Helper to proxy external images through our backend to avoid CORS issues
+String _proxyImageUrl(String? originalUrl) {
+  if (originalUrl == null || originalUrl.isEmpty) return '';
+  if (!originalUrl.startsWith('http')) return originalUrl;
+  // Route through our backend proxy
+  final encodedUrl = Uri.encodeComponent(originalUrl);
+  return '${ApiConstants.baseUrl}/proxy/image?url=$encodedUrl';
+}
+
 
 /// Model for a headline card
 class HeadlineData {
@@ -46,9 +56,19 @@ class HeadlineCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (headlines.isEmpty) return const SizedBox.shrink();
+    // Filter for valid cards with images (Strict Mode)
+    final validHeadlines = headlines.where((h) => 
+      h.imageUrl != null && 
+      h.imageUrl!.isNotEmpty && 
+      h.imageUrl != 'null' &&
+      h.imageUrl!.startsWith('http')
+    ).toList();
 
-    final displayHeadlines = headlines.take(maxCards).toList();
+    // MATCHING CHATGPT: If fewer than 2 valid cards with images, do not show the section at all.
+    // Single cards look awkward in a horizontal list.
+    if (validHeadlines.length < 2) return const SizedBox.shrink();
+
+    final displayHeadlines = validHeadlines.take(maxCards).toList();
 
     return SizedBox(
       height: 220, // Fixed height for horizontal scroll cards
@@ -189,11 +209,13 @@ class _ChatGPTHeadlineCardState extends State<_ChatGPTHeadlineCard> {
   Widget _buildImage(bool isDark) {
     if (widget.headline.imageUrl != null && 
         widget.headline.imageUrl!.isNotEmpty) {
+      // Use proxy to avoid CORS issues with external images
+      final proxiedUrl = _proxyImageUrl(widget.headline.imageUrl);
       return SizedBox(
         height: 120,
         width: double.infinity,
         child: CachedNetworkImage(
-          imageUrl: widget.headline.imageUrl!,
+          imageUrl: proxiedUrl,
           fit: BoxFit.cover,
           placeholder: (context, url) => _buildImagePlaceholder(isDark),
           errorWidget: (context, url, error) => _buildImagePlaceholder(isDark),
@@ -204,32 +226,12 @@ class _ChatGPTHeadlineCardState extends State<_ChatGPTHeadlineCard> {
   }
 
   Widget _buildImagePlaceholder(bool isDark) {
-    // Generate gradient color based on source name
-    final colors = [
-      [const Color(0xFF667EEA), const Color(0xFF764BA2)],
-      [const Color(0xFFF093FB), const Color(0xFFF5576C)],
-      [const Color(0xFF4FACFE), const Color(0xFF00F2FE)],
-      [const Color(0xFF43E97B), const Color(0xFF38F9D7)],
-      [const Color(0xFFFA709A), const Color(0xFFFEE140)],
-    ];
-    final colorIndex = widget.headline.source.hashCode.abs() % colors.length;
-    
-    return Container(
+    // ChatGPT-style shimmer loading animation
+    return const ShimmerLoading(
       height: 120,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors[colorIndex],
-        ),
-      ),
-      child: Center(
-        child: HugeIcon(
-          icon: HugeIcons.strokeRoundedNews,
-          color: Colors.white.withValues(alpha: 0.8),
-          size: 36,
-        ),
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(12),
+        topRight: Radius.circular(12),
       ),
     );
   }
@@ -254,24 +256,23 @@ class _ChatGPTHeadlineCardState extends State<_ChatGPTHeadlineCard> {
     return Row(
       children: [
         // Icon badge (letter-based fallback - no CORS issues)
-        Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            color: badgeColors[colorIndex],
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Center(
-            child: Text(
-              letter,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
+        // Icon badge (Favicon or fallback)
+        if (widget.headline.sourceIconUrl != null && widget.headline.sourceIconUrl!.isNotEmpty)
+          CachedNetworkImage(
+            imageUrl: _proxyImageUrl(widget.headline.sourceIconUrl),
+            width: 20,
+            height: 20,
+            imageBuilder: (context, imageProvider) => Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                image: DecorationImage(image: imageProvider, fit: BoxFit.cover),
               ),
             ),
-          ),
-        ),
+            placeholder: (context, url) => _buildLetterFallback(badgeColors, colorIndex, letter),
+            errorWidget: (context, url, error) => _buildLetterFallback(badgeColors, colorIndex, letter),
+          )
+        else
+          _buildLetterFallback(badgeColors, colorIndex, letter),
         const SizedBox(width: 6),
         
         // Source name
@@ -288,6 +289,27 @@ class _ChatGPTHeadlineCardState extends State<_ChatGPTHeadlineCard> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildLetterFallback(List<Color> badgeColors, int colorIndex, String letter) {
+    return Container(
+      width: 20,
+      height: 20,
+      decoration: BoxDecoration(
+        color: badgeColors[colorIndex],
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Center(
+        child: Text(
+          letter,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
     );
   }
 }

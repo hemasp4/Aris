@@ -30,7 +30,6 @@ class _MediaPickerButtonState extends State<MediaPickerButton> {
   bool _isProcessing = false;
 
   Future<void> _showPickerOptions(BuildContext context) async {
-    final theme = Theme.of(context);
 
     showModalBottomSheet(
       context: context,
@@ -245,7 +244,7 @@ class _MediaPickerButtonState extends State<MediaPickerButton> {
         Icons.attach_file,
         color: widget.enabled
             ? theme.colorScheme.onSurface
-            : theme.colorScheme.onSurface.withOpacity(0.3),
+            : theme.colorScheme.onSurface.withValues(alpha: 0.3),
       ),
       onPressed: widget.enabled ? () => _showPickerOptions(context) : null,
       tooltip: 'Attach file',

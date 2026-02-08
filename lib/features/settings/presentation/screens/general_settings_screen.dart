@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
+import 'package:dio/dio.dart';
 
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -221,7 +222,7 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
             itemCount: _languages.length,
             itemBuilder: (context, index) {
               final lang = _languages[index];
-              final isSelected = lang == _appLanguage;
+              // final isSelected = lang == _appLanguage;
               return RadioListTile<String>(
                 title: Text(
                   lang,
@@ -297,7 +298,7 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                     labelText: 'Server URL',
                     labelStyle: GoogleFonts.inter(color: AppColors.textSecondary),
                     hintText: 'http://192.168.1.100:8000',
-                    hintStyle: GoogleFonts.inter(color: AppColors.textSecondary.withOpacity(0.5)),
+                    hintStyle: GoogleFonts.inter(color: AppColors.textSecondary.withValues(alpha: 0.5)),
                     filled: true,
                     fillColor: AppColors.background,
                     border: OutlineInputBorder(
@@ -383,17 +384,21 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                 
                 try {
                   final url = controller.text.trim();
-                  final uri = Uri.parse('$url/health');
-                  final response = await Future.any([
-                    Future.delayed(const Duration(seconds: 5), () => throw TimeoutException('Timeout')),
-                  ]);
-                  setDialogState(() {
-                    testResult = '✓ Connected successfully!';
-                    isTesting = false;
-                  });
+                  // Test connection
+                  final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 5)));
+                  final response = await dio.get('$url/health');
+                  
+                  if (response.statusCode == 200) {
+                     setDialogState(() {
+                      testResult = '✓ Connected successfully!';
+                      isTesting = false;
+                    });
+                  } else {
+                    throw Exception('Status code: ${response.statusCode}');
+                  }
                 } catch (e) {
                   setDialogState(() {
-                    testResult = '✗ Connection failed. Check the URL and ensure the server is running.';
+                    testResult = '✗ Connection failed: ${e.toString().split(':')[0]}';
                     isTesting = false;
                   });
                 }
@@ -417,14 +422,18 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                 final url = controller.text.trim();
                 if (url.isNotEmpty) {
                   // Save to secure storage
+                  // Save to secure storage
                   await _secureStorage.write(key: StorageKeys.baseUrl, value: url);
                   // Update API constants
                   ApiConstants.setBaseUrl(url);
+                  
+                  if (!context.mounted) return;
                   setState(() => _serverUrl = url);
                   
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(this.context).showSnackBar(
+                  Navigator.pop(context);
+                  
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Server URL updated. Restart app for full effect.'),
                         backgroundColor: AppColors.primary,

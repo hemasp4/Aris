@@ -170,7 +170,7 @@ class ChatInfoPanel extends StatelessWidget {
                             Switch(
                               value: memoryEnabled,
                               onChanged: onMemoryToggled,
-                              activeColor: AppColors.accent,
+                              activeTrackColor: AppColors.accent,
                             ),
                           ],
                         ),

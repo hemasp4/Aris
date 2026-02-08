@@ -80,7 +80,7 @@ class _SecuritySettingsScreenState extends ConsumerState<SecuritySettingsScreen>
                       Switch(
                         value: _mfaEnabled,
                         onChanged: (value) => setState(() => _mfaEnabled = value),
-                        activeColor: AppColors.primary,
+                        activeThumbColor: AppColors.primary,
                         activeTrackColor: AppColors.primary.withValues(alpha: 0.5),
                         inactiveThumbColor: AppColors.textMuted,
                         inactiveTrackColor: AppColors.toggleTrackOff,

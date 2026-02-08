@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -24,7 +25,6 @@ class ChatMessage {
     required this.id,
     required this.role,
     required this.content,
-    required this.timestamp,
     required this.timestamp,
     this.isStreaming = false,
     this.headlines,
@@ -49,11 +49,11 @@ class ChatMessage {
   ChatMessage copyWith({
     String? content,
     bool? isStreaming,
+    List<Map<String, dynamic>>? headlines,
   }) {
     return ChatMessage(
       id: id,
       role: role,
-      content: content ?? this.content,
       content: content ?? this.content,
       timestamp: timestamp,
       isStreaming: isStreaming ?? this.isStreaming,
@@ -106,6 +106,36 @@ class ChatSession {
   }
 }
 
+
+/// Deep Research Progress Model
+class ResearchProgress {
+  final String currentState; // 'searching', 'reading', etc.
+  final String currentMessage;
+  final List<Map<String, dynamic>> logs; // List of {message, timestamp, state}
+  final bool isComplete;
+
+  const ResearchProgress({
+    this.currentState = '',
+    this.currentMessage = '',
+    this.logs = const [],
+    this.isComplete = false,
+  });
+
+  ResearchProgress copyWith({
+    String? currentState,
+    String? currentMessage,
+    List<Map<String, dynamic>>? logs,
+    bool? isComplete,
+  }) {
+    return ResearchProgress(
+      currentState: currentState ?? this.currentState,
+      currentMessage: currentMessage ?? this.currentMessage,
+      logs: logs ?? this.logs,
+      isComplete: isComplete ?? this.isComplete,
+    );
+  }
+}
+
 /// Chat state model
 class ChatState {
   final List<ChatSession> sessions;
@@ -122,6 +152,9 @@ class ChatState {
   final List<String> scrapingSources;
   final List<Map<String, dynamic>> headlines;
   final String? researchMode; // null = normal, 'web_search', 'deep_research', 'shopping'
+  
+  // Deep Research State
+  final ResearchProgress? researchProgress;
   
   // Quota state for usage limits
   final bool quotaExceeded;
@@ -141,6 +174,7 @@ class ChatState {
     this.scrapingSources = const [],
     this.headlines = const [],
     this.researchMode,
+    this.researchProgress,
     this.quotaExceeded = false,
     this.quotaMessage,
     this.quotaResetHours,
@@ -159,6 +193,7 @@ class ChatState {
     List<String>? scrapingSources,
     List<Map<String, dynamic>>? headlines,
     String? researchMode,
+    ResearchProgress? researchProgress,
     bool? quotaExceeded,
     String? quotaMessage,
     int? quotaResetHours,
@@ -176,6 +211,7 @@ class ChatState {
       scrapingSources: scrapingSources ?? this.scrapingSources,
       headlines: headlines ?? this.headlines,
       researchMode: researchMode ?? this.researchMode,
+      researchProgress: researchProgress ?? this.researchProgress,
       quotaExceeded: quotaExceeded ?? this.quotaExceeded,
       quotaMessage: quotaMessage ?? this.quotaMessage,
       quotaResetHours: quotaResetHours ?? this.quotaResetHours,
@@ -199,19 +235,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
        // On Login (transition to authenticated)
        if (next.status == AuthStatus.authenticated && 
            previous?.status != AuthStatus.authenticated) {
-           print('[ChatNotifier] User authenticated. Loading sessions.');
+           // print('[ChatNotifier] User authenticated. Loading sessions.');
            loadSessions(); 
        }
        // On Logout (transition to unauthenticated)
        else if (previous?.status == AuthStatus.authenticated && 
            next.status == AuthStatus.unauthenticated) {
-           print('[ChatNotifier] User logged out. Clearing cache and state.');
+           // print('[ChatNotifier] User logged out. Clearing cache and state.');
            await _clearAllCache();
            state = const ChatState();
        }
        // On User Change (e.g. fast switch)
        else if (previous?.user?.id != next.user?.id && next.user != null) {
-           print('[ChatNotifier] User changed. Clearing cache and reloading.');
+           // print('[ChatNotifier] User changed. Clearing cache and reloading.');
            await _clearAllCache();
            state = const ChatState(isLoading: true); 
            loadSessions();
@@ -238,7 +274,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         await Hive.box('chat_cache').clear();
       }
     } catch (e) {
-      print('[ChatNotifier] Cache clear error: $e');
+      // print('[ChatNotifier] Cache clear error: $e');
     }
   }
 
@@ -253,17 +289,18 @@ class ChatNotifier extends StateNotifier<ChatState> {
           
         state = state.copyWith(
           sessions: cachedSessions,
-          isLoading: state.sessions.isEmpty, // Only show loading if cache is empty
+          isLoading: false, 
         );
       } else {
+        // Only show loading if we have absolutely nothing
         state = state.copyWith(isLoading: true);
       }
     } catch (e) {
-      print('[Chat] Cache load error: $e');
+      // print('[Chat] Cache load error: $e');
       state = state.copyWith(isLoading: true);
     }
     
-    // 2. Fetch from API
+    // 2. Fetch from API (Background Sync)
     try {
       final response = await _client.dio.get(ApiConstants.chats);
       
@@ -271,24 +308,32 @@ class ChatNotifier extends StateNotifier<ChatState> {
         final List<dynamic> data = response.data['chats'] ?? response.data ?? [];
         final sessions = data.map((json) => ChatSession.fromJson(json)).toList();
         
-        // 3. Update State & Cache
+        // 3. Smart Merge / Update State
+        // We replace entirely because the server is the source of truth for the list order/existence
         state = state.copyWith(
           sessions: sessions,
           isLoading: false,
         );
         
+        // Update Cache
         final box = Hive.box<ChatSession>('sessions');
         await box.clear();
         await box.addAll(sessions);
       }
     } on DioException catch (e) {
-      // If network fails, we still have cache (if loaded)
-      state = state.copyWith(
-        isLoading: false,
-        error: state.sessions.isEmpty ? (e.response?.data?['detail'] ?? 'Failed to load chats') : null,
-      );
+      // If network fails, we keep the cache (stale-while-revalidate pattern)
+      if (state.sessions.isEmpty) {
+         state = state.copyWith(
+            isLoading: false,
+            error: e.response?.data?['detail'] ?? 'Failed to load chats',
+         );
+      } else {
+        // print('[Chat] API sync failed, using cache: $e');
+      }
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      if (state.sessions.isEmpty) {
+        state = state.copyWith(isLoading: false, error: e.toString());
+      }
     }
   }
 
@@ -328,6 +373,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
       
       if (response.statusCode == 200 || response.statusCode == 201) {
         final session = ChatSession.fromJson(response.data);
+        // Persist immediately to Hive to prevent "disappearing" if app restart before sync
+        final box = Hive.box<ChatSession>('sessions');
+        await box.put(session.id, session);
+        
         state = state.copyWith(
           sessions: [session, ...state.sessions],
           currentSessionId: session.id,
@@ -379,7 +428,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         );
       }
     } catch (e) {
-      print('[Chat] Message cache load error: $e');
+      // print('[Chat] Message cache load error: $e');
       state = state.copyWith(isLoading: true, currentSessionId: sessionId);
     }
     
@@ -482,12 +531,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
     try {
       // Get session ID or create new one
       String? sessionId = state.currentSessionId;
-      print('[Chat] sendMessage: currentSessionId = $sessionId');
+      // print('[Chat] sendMessage: currentSessionId = $sessionId');
       
       if (sessionId == null || sessionId.isEmpty || sessionId == 'sample-session') {
-        print('[Chat] Creating new session...');
+        // print('[Chat] Creating new session...');
         sessionId = await createSession();
-        print('[Chat] New session created: $sessionId');
+        // print('[Chat] New session created: $sessionId');
         if (sessionId == null) {
           throw Exception('Failed to create chat session');
         }
@@ -495,7 +544,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         // Critical: Update state with new session ID immediately so UI knows we're in a valid chat
         state = state.copyWith(currentSessionId: sessionId);
       } else {
-        print('[Chat] Reusing existing session: $sessionId');
+        // print('[Chat] Reusing existing session: $sessionId');
       }
 
       // Get selected model
@@ -521,11 +570,181 @@ class ChatNotifier extends StateNotifier<ChatState> {
         authToken: authToken,
       )) {
         // print('SSE event: ${event.event}'); // Debug
-        
-        switch (event.event) {
+        _handleSseEvent(event);
+      }
+      
+      _finalizeStreamingMessage();
+    } catch (e) {
+      // print('Streaming error: $e');
+      state = state.copyWith(
+        isStreaming: false,
+        error: 'Failed to send message: $e',
+      );
+      _removeLastMessage();
+    }
+  }
+
+  void _appendToStreamingMessage(String content) {
+    if (state.messages.isEmpty || content.isEmpty) return;
+    
+    // Log first token timing for performance tracking
+    if (_streamStartTime != null && _isFirstToken) {
+      // final elapsed = DateTime.now().difference(_streamStartTime!).inMilliseconds;
+      // print('First token received in ${elapsed}ms');
+      _isFirstToken = false;
+    }
+    
+    // Immediate update for ChatGPT-style smooth streaming
+    // No buffering, no debounce - update UI for every token
+    final messages = List<ChatMessage>.from(state.messages);
+    final lastIndex = messages.length - 1;
+    final lastMessage = messages[lastIndex];
+    
+    if (lastMessage.isStreaming) {
+      messages[lastIndex] = lastMessage.copyWith(
+        content: lastMessage.content + content,
+      );
+      state = state.copyWith(messages: messages);
+    }
+  }
+
+  void _attachHeadlinesToStreamingMessage(List<Map<String, dynamic>> headlines) {
+    if (state.messages.isEmpty) return;
+    
+    final messages = List<ChatMessage>.from(state.messages);
+    final lastIndex = messages.length - 1;
+    final lastMessage = messages[lastIndex];
+    
+    if (lastMessage.isStreaming) {
+      messages[lastIndex] = lastMessage.copyWith(
+        headlines: headlines, // Uses the new field we added
+      );
+      state = state.copyWith(messages: messages);
+    }
+  }
+  
+  // ==================== Edit & Regenerate ====================
+
+ 
+  /// Edit message and stream response (Truncates history)
+  Future<void> editMessage(String messageId, String newContent) async {
+    // We need to set state to streaming
+    state = state.copyWith(
+      isStreaming: true,
+      error: null,
+    );
+    _streamStartTime = DateTime.now();
+    _tokenBuffer.clear();
+    _isFirstToken = true;
+
+    try {
+      final sessionId = state.currentSessionId!; 
+      const storage = FlutterSecureStorage();
+      final authToken = await storage.read(key: StorageKeys.authToken);
+      
+      final url = '${ApiConstants.apiUrl}/chats/$sessionId/edit';
+      
+      await for (final event in sseClient.stream(
+        url: url,
+        body: {
+          'message_id': messageId,
+          'content': newContent,
+        },
+        authToken: authToken,
+      )) {
+        await _handleSseEvent(event);
+      }
+    } catch (e) {
+      state = state.copyWith(
+        isStreaming: false, 
+        error: 'Failed to edit message: $e'
+      );
+    }
+  }
+
+  /// Regenerate response and stream (Truncates history)
+  Future<void> regenerateMessage(String assistantMessageId) async {
+    final sessionId = state.currentSessionId;
+    if (sessionId == null) {
+      state = state.copyWith(
+        error: 'Cannot regenerate: no active chat session',
+      );
+      return;
+    }
+    
+    state = state.copyWith(
+      isStreaming: true,
+      error: null,
+    );
+    _streamStartTime = DateTime.now();
+    _tokenBuffer.clear();
+    _isFirstToken = true;
+
+    try {
+      const storage = FlutterSecureStorage();
+      final authToken = await storage.read(key: StorageKeys.authToken);
+      
+      final url = '${ApiConstants.apiUrl}/chats/$sessionId/regenerate';
+      debugPrint('[REGENERATE] URL: $url, messageId: $assistantMessageId');
+      
+      await for (final event in sseClient.stream(
+        url: url,
+        body: {
+          'assistant_message_id': assistantMessageId,
+        },
+        authToken: authToken,
+      )) {
+        await _handleSseEvent(event);
+      }
+    } catch (e) {
+      debugPrint('[REGENERATE] Error: $e');
+      state = state.copyWith(
+        isStreaming: false, 
+        error: 'Failed to regenerate: $e'
+      );
+    }
+  }
+
+  /// Refactored SSE Event Handler
+  Future<void> _handleSseEvent(SSEEvent event) async {
+     switch (event.event) {
           case 'done':
             _finalizeStreamingMessage();
             return;
+            
+          case 'title_generated':
+             // Update chat title locally and in cache
+             final title = event.data['title']?.toString();
+             final chatId = event.data['chat_id']?.toString();
+             
+             if (title != null && chatId != null) {
+               // Update state
+               final updatedSessions = state.sessions.map((s) {
+                 if (s.id == chatId) {
+                   return ChatSession(
+                     id: s.id,
+                     title: title,
+                     createdAt: s.createdAt,
+                     updatedAt: DateTime.now(), // Bump updated time
+                     isPinned: s.isPinned,
+                     isArchived: s.isArchived,
+                   );
+                 }
+                 return s;
+               }).toList();
+               
+               state = state.copyWith(sessions: updatedSessions);
+               
+               // Update Hive Cache
+               try {
+                 final box = Hive.box<ChatSession>('sessions');
+                 await box.clear();
+                 await box.addAll(updatedSessions);
+               } catch (e) {
+                 // debugPrint('[Chat] Failed to update title in cache: $e');
+               }
+             }
+             return; 
             
           case 'error':
             state = state.copyWith(
@@ -534,20 +753,46 @@ class ChatNotifier extends StateNotifier<ChatState> {
               isThinking: false,
               isSearching: false,
               isScraping: false,
+              researchProgress: null,
             );
             _finalizeStreamingMessage();
             return;
+
+          case 'progress':
+             // Handle Deep Research Progress
+             final pState = event.data['state']?.toString() ?? '';
+             final pMsg = event.data['message']?.toString() ?? '';
+             
+             final currentProgress = state.researchProgress ?? const ResearchProgress();
+             
+             // Add to logs
+             final newLog = {
+               'state': pState,
+               'message': pMsg,
+               'timestamp': DateTime.now().toIso8601String(),
+               'data': event.data['data']
+             };
+             
+             state = state.copyWith(
+               researchProgress: currentProgress.copyWith(
+                 currentState: pState,
+                 currentMessage: pMsg,
+                 logs: [...currentProgress.logs, newLog],
+                 isComplete: pState == 'DONE'
+               ),
+               // Also set standard flags for compatibility if needed
+               isThinking: true, // Keep "thinking" on during research
+             );
+             break;
             
           case 'quota_exceeded':
-            // Show quota message above text box like ChatGPT
             state = state.copyWith(
               quotaExceeded: true,
-              quotaMessage: event.data['message']?.toString() ?? 'Daily limit reached. Come back tomorrow.',
+              quotaMessage: event.data['message']?.toString() ?? 'Daily limit reached.',
               quotaResetHours: event.data['reset_in_hours'] as int?,
               isStreaming: false,
               isThinking: false,
             );
-            _removeLastMessage(); // Remove the placeholder AI message
             return;
             
           case 'token':
@@ -626,70 +871,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
               headlines: [],
             );
             break;
-            
-          default:
-            // Handle legacy format or unknown events
-            final chunkContent = event.data['content']?.toString() ?? '';
-            if (chunkContent.isNotEmpty) {
-              _appendToStreamingMessage(chunkContent);
-            }
         }
-      }
-      
-      _finalizeStreamingMessage();
-    } catch (e) {
-      // print('Streaming error: $e');
-      state = state.copyWith(
-        isStreaming: false,
-        error: 'Failed to send message: $e',
-      );
-      _removeLastMessage();
-    }
   }
 
-  void _appendToStreamingMessage(String content) {
-    if (state.messages.isEmpty || content.isEmpty) return;
-    
-    // Log first token timing for performance tracking
-    if (_streamStartTime != null && _isFirstToken) {
-      final elapsed = DateTime.now().difference(_streamStartTime!).inMilliseconds;
-      // print('First token received in ${elapsed}ms');
-      _isFirstToken = false;
-    }
-    
-    // Immediate update for ChatGPT-style smooth streaming
-    // No buffering, no debounce - update UI for every token
-    final messages = List<ChatMessage>.from(state.messages);
-    final lastIndex = messages.length - 1;
-    final lastMessage = messages[lastIndex];
-    
-    if (lastMessage.isStreaming) {
-      messages[lastIndex] = lastMessage.copyWith(
-        content: lastMessage.content + content,
-      );
-      state = state.copyWith(messages: messages);
-    }
-  }
-
-  void _attachHeadlinesToStreamingMessage(List<Map<String, dynamic>> headlines) {
-    if (state.messages.isEmpty) return;
-    
-    final messages = List<ChatMessage>.from(state.messages);
-    final lastIndex = messages.length - 1;
-    final lastMessage = messages[lastIndex];
-    
-    if (lastMessage.isStreaming) {
-      messages[lastIndex] = lastMessage.copyWith(
-        headlines: headlines, // Uses the new field we added
-      );
-      state = state.copyWith(messages: messages);
-    }
-  }
-  
   void _flushTokenBuffer() {
     // No longer needed - kept for compatibility
   }
-  
+
   // Track first token for timing
   bool _isFirstToken = true;
 
@@ -967,7 +1155,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Clear current session
   void clearCurrentSession() {
-    print('[Chat] clearCurrentSession called - resetting currentSessionId to null');
+    // print('[Chat] clearCurrentSession called - resetting currentSessionId to null');
     state = state.copyWith(
       currentSessionId: null,
       messages: [],

@@ -107,7 +107,7 @@ class ArticlePreviewSheet extends StatelessWidget {
                         width: double.infinity,
                         height: 200,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
                       ),
                     ),
                   if (imageUrl != null && imageUrl!.isNotEmpty)

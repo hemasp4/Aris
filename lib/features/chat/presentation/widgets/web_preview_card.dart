@@ -69,11 +69,10 @@ class WebPreviewCard extends StatelessWidget {
                   if (!compact) ...[
                     const SizedBox(height: 8),
                     
-                    // Summary or content preview
                     Text(
                       result.summary ?? _getPreview(result.content),
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withOpacity(0.7),
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                       ),
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
@@ -95,11 +94,11 @@ class WebPreviewCard extends StatelessWidget {
       child: CachedNetworkImage(
         imageUrl: imageUrl,
         fit: BoxFit.cover,
-        placeholder: (_, __) => Container(
+        placeholder: (context, url) => Container(
           color: Colors.grey[200],
           child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
-        errorWidget: (_, __, ___) => Container(
+        errorWidget: (context, url, error) => Container(
           color: Colors.grey[200],
           child: const Icon(Icons.image, size: 40, color: Colors.grey),
         ),
@@ -254,12 +253,12 @@ class ScrapedImageGallery extends StatelessWidget {
             width: 80,
             height: 80,
             fit: BoxFit.cover,
-            placeholder: (_, __) => Container(
+            placeholder: (context, url) => Container(
               width: 80,
               height: 80,
               color: Colors.grey[200],
             ),
-            errorWidget: (_, __, ___) => Container(
+            errorWidget: (context, url, error) => Container(
               width: 80,
               height: 80,
               color: Colors.grey[200],

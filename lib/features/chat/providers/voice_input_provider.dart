@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -28,7 +28,8 @@ class VoiceInputData {
   final String sessionId; // Critical: Unique ID for every mic tap
   final VoiceInputState state;
   final double amplitude; // Raw amplitude (0.0 - 1.0)
-  final String? transcribedText;
+  final String? transcribedText; // Current transcription
+  final String accumulatedText; // All transcriptions combined (ChatGPT style)
   final String? error;
   
   const VoiceInputData({
@@ -36,6 +37,7 @@ class VoiceInputData {
     this.state = VoiceInputState.idle,
     this.amplitude = 0.0,
     this.transcribedText,
+    this.accumulatedText = '',
     this.error,
   });
 
@@ -43,6 +45,7 @@ class VoiceInputData {
   factory VoiceInputData.initial() => const VoiceInputData(
     sessionId: '',
     state: VoiceInputState.idle,
+    accumulatedText: '',
   );
 
   VoiceInputData copyWith({
@@ -50,6 +53,7 @@ class VoiceInputData {
     VoiceInputState? state,
     double? amplitude,
     String? transcribedText,
+    String? accumulatedText,
     String? error,
   }) {
     return VoiceInputData(
@@ -57,6 +61,7 @@ class VoiceInputData {
       state: state ?? this.state,
       amplitude: amplitude ?? this.amplitude,
       transcribedText: transcribedText ?? this.transcribedText,
+      accumulatedText: accumulatedText ?? this.accumulatedText,
       error: error ?? this.error,
     );
   }
@@ -75,15 +80,17 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
 
   /// START NEW SESSION (Strict Isolation)
   Future<void> startRecording() async {
-    print('[Voice] Start called. Creating NEW clean session.');
+    // print('[Voice] Start called. Creating NEW clean session.');
     
-    // 1. Strict Reset: Wipe everything.
+    // 1. Strict Reset: Wipe everything EXCEPT accumulated text for append mode
     final newSessionId = const Uuid().v4();
+    final previousAccumulated = state.accumulatedText; // Preserve for append
     state = VoiceInputData(
       sessionId: newSessionId,
       state: VoiceInputState.requestingPermission,
       amplitude: 0.0,
-      transcribedText: null, // Clear text
+      transcribedText: null, // Clear current transcription
+      accumulatedText: previousAccumulated, // PRESERVE previous accumulated text!
       error: null,
     );
     
@@ -108,7 +115,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
       _startAmplitudeLoop();
 
     } catch (e) {
-      print('[Voice] Start failed: $e');
+      // print('[Voice] Start failed: $e');
       _cleanup();
       state = state.copyWith(state: VoiceInputState.idle, error: 'Failed to start: $e');
     }
@@ -116,7 +123,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
 
   /// STOP & TRANSCRIBE
   Future<String?> stopRecording() async {
-    print('[Voice] Stop called. Session: ${state.sessionId}');
+    // print('[Voice] Stop called. Session: ${state.sessionId}');
     
     if (state.state == VoiceInputState.idle) return null;
     
@@ -133,7 +140,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
         finalText = await _stopMobilePipeline();
       }
     } catch (e) {
-      print('[Voice] Stop/Transcribe failed: $e');
+      // print('[Voice] Stop/Transcribe failed: $e');
       state = state.copyWith(error: 'Transcription failed');
     } finally {
       // Final Cleanup
@@ -142,12 +149,17 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     
     // strict logic: If text found -> Idle (ready to send/edit). If empty -> NoSpeech.
     if (finalText != null && finalText.trim().isNotEmpty) {
-      // Update text one last time
+      // Append to accumulated text (ChatGPT-style: multiple recordings add up)
+      final newAccumulated = state.accumulatedText.isEmpty
+          ? finalText.trim()
+          : '${state.accumulatedText} ${finalText.trim()}';
+      
       state = state.copyWith(
         state: VoiceInputState.idle, 
         transcribedText: finalText,
+        accumulatedText: newAccumulated,
       );
-      return finalText; // Return for explicit handling by UI
+      return newAccumulated; // Return full accumulated text for UI
     } else {
       state = state.copyWith(state: VoiceInputState.noSpeech);
       return null;
@@ -156,7 +168,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
 
   /// CANCEL (Abort)
   Future<void> cancelRecording() async {
-    print('[Voice] Cancel called. Aborting session.');
+    // print('[Voice] Cancel called. Aborting session.');
     _cleanup();
     // Reset to clean idle
     state = VoiceInputData.initial();
@@ -175,7 +187,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     final path = await _recorder.stop();
     if (path == null) return null;
     
-    print('[Voice-Web] Blob path: $path');
+    // print('[Voice-Web] Blob path: $path');
     return await _uploadBlob(path);
   }
 
@@ -202,7 +214,7 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
         return response.data['text'] as String?;
       }
     } catch (e) {
-      print('[Voice-Web] Upload error: $e');
+      // print('[Voice-Web] Upload error: $e');
     }
     return null;
   }
@@ -282,9 +294,9 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
        double normalized = 0.0;
        
        if (kIsWeb) {
-         // WEB: Fake amplitude for visual aliveness (VoiceWaveformWidget handles smoothing)
-         // Just toggle some activity flag or send random noise
-         normalized = 0.2 + (Random().nextDouble() * 0.5); 
+         // WEB: Send 0.0 so VoiceWaveformWidget uses its internal "Organic Speech" simulation
+         // (The previous random noise prevented the high-quality simulation from running)
+         normalized = 0.0; 
        } else {
          // MOBILE: Real RMS
          final amp = await _recorder.getAmplitude();
@@ -321,9 +333,29 @@ class VoiceInputNotifier extends StateNotifier<VoiceInputData> {
     super.dispose();
   }
   
-  // Explicit Reset
+  // Explicit Reset (clears everything)
   void reset() {
     state = VoiceInputData.initial();
+  }
+  
+  /// Set prefix text (existing typed text before starting voice)
+  void setPrefix(String prefix) {
+    state = state.copyWith(accumulatedText: prefix);
+  }
+  
+  /// Clear accumulated text (called after sending message)
+  void clearAccumulatedText() {
+    state = state.copyWith(
+      transcribedText: null,
+      accumulatedText: '',
+    );
+  }
+  
+  /// Restart recording (for "No Speech" retry - keeps accumulated text)
+  Future<void> restartRecording() async {
+    // Don't clear accumulated text - just start a new recording
+    await cancelRecording();
+    await startRecording();
   }
 }
 

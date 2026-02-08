@@ -28,6 +28,7 @@ class ExpandableInputBox extends ConsumerStatefulWidget {
   final VoidCallback? onVoiceTap;
   final VoidCallback? onVoiceStopAndSend;
   final VoidCallback? onVoiceCancel;
+  final VoidCallback? onVoiceRestart; // New: Restart voice recording
   final VoidCallback? onCancelStream;
   final VoidCallback? onClearResearchMode;
   final Function(File)? onRemoveImage;
@@ -47,6 +48,7 @@ class ExpandableInputBox extends ConsumerStatefulWidget {
     this.onVoiceTap,
     this.onVoiceStopAndSend,
     this.onVoiceCancel,
+    this.onVoiceRestart,
     this.onCancelStream,
     this.onClearResearchMode,
     this.onRemoveImage,
@@ -67,34 +69,21 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   double _currentHeight = _minHeight;
   int _lineCount = 1;
   
-  // Debounce for voice cancel button to prevent accidental cancellation
-  DateTime? _voiceStartTime;
+
   
-  bool get _canCancelVoice {
-    if (_voiceStartTime == null) return false;
-    final elapsed = DateTime.now().difference(_voiceStartTime!);
-    return elapsed.inMilliseconds > 500; // 500ms debounce
-  }
+
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onTextChanged);
-    // Initialize voice start time if already in voice mode
-    if (widget.isVoiceListening) {
-      _voiceStartTime = DateTime.now();
-    }
+
   }
   
   @override
   void didUpdateWidget(covariant ExpandableInputBox oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Track when voice mode starts for debounce
-    if (widget.isVoiceListening && !oldWidget.isVoiceListening) {
-      _voiceStartTime = DateTime.now();
-    } else if (!widget.isVoiceListening && oldWidget.isVoiceListening) {
-      _voiceStartTime = null;
-    }
+
   }
 
   @override
@@ -225,14 +214,13 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
-            // Use near-black with transparency for that "deep glass" look
+            // ChatGPT-style: glassmorphic with transparency + blur
             color: isDarkMode 
-                ? const Color(0xFF171717).withValues(alpha: 0.75) 
-                : const Color(0xFFFFFFFF).withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(26), // Reverted to 26
-            // Slightly more visible border
+                ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(26),
             border: Border.all(
-              color: isDarkMode ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.08),
+              color: isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
               width: 1,
             ),
           ),
@@ -260,52 +248,59 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   /// Research mode pill INSIDE the input box (ChatGPT style)
   Widget _buildInlineResearchPill() {
     dynamic icon;
-    String label;
+    String pillText = "";
     
     switch (widget.researchMode) {
       case 'deep_research':
         icon = HugeIcons.strokeRoundedBrain;
-        label = 'Deep Research';
+        pillText = "Deep Research";
         break;
       case 'shopping':
         icon = HugeIcons.strokeRoundedShoppingCart01;
-        label = 'Shopping';
+        pillText = "Shopping";
         break;
       case 'web_search':
+        icon = HugeIcons.strokeRoundedSearch01;
+        pillText = "Web Search";
+        break;
       default:
         icon = HugeIcons.strokeRoundedSearch01;
-        label = 'Search';
+        pillText = "Search";
         break;
     }
     
     return Padding(
       padding: const EdgeInsets.only(left: 12, top: 10, right: 12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppColors.surfaceLight.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(14),
+          color: Colors.black.withValues(alpha: 0.8), // Darker, more distinct pill
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.5),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            HugeIcon(icon: icon, size: 14, color: const Color(0xFF0EA5E9)),
-            const SizedBox(width: 5),
+            HugeIcon(icon: icon, size: 14, color: Colors.white), // White text/icon for contrast
+            const SizedBox(width: 6),
             Text(
-              label,
+              pillText, 
               style: const TextStyle(
-                color: Color(0xFF0EA5E9),
-                fontSize: 12,
+                color: Colors.white,
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             GestureDetector(
               onTap: widget.onClearResearchMode,
-              child: HugeIcon(
-                icon: HugeIcons.strokeRoundedCancel01,
-                size: 14,
-                color: Color(0xFF0EA5E9),
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 10, color: Colors.white),
               ),
             ),
           ],
@@ -638,26 +633,36 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   Widget _buildAttachmentButton() {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
-    // Match the exact style of the input box (Deep Dark Glass)
-    return Container(
-      width: 44,
-      height: 44,
-      margin: const EdgeInsets.only(bottom: 2),
-      decoration: BoxDecoration(
-        color: isDarkMode 
-            ? const Color(0xFF171717).withValues(alpha: 0.75) 
-            : const Color(0xFFFFFFFF).withValues(alpha: 0.85),
-        shape: BoxShape.circle,
-        border: Border.all(
-           color: isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
-           width: 1,
+    // Match the exact style of the input box (Deep Dark Glass) with same blur effect
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            // Match navbar/input box: glassmorphic
+            color: isDarkMode 
+                ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+            shape: BoxShape.circle,
+            border: Border.all(
+               color: isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.06),
+               width: 1,
+            ),
+          ),
+          child: IconButton(
+            icon: HugeIcon(
+              icon: HugeIcons.strokeRoundedAdd01, 
+              color: isDarkMode ? Colors.white.withValues(alpha: 0.9) : Colors.black.withValues(alpha: 0.9), // Match other icons
+              size: 24,
+            ), 
+            onPressed: widget.onAttachmentTap,
+            padding: EdgeInsets.zero,
+            tooltip: 'Attach',
+          ),
         ),
-      ),
-      child: IconButton(
-        icon: HugeIcon(icon: HugeIcons.strokeRoundedAdd01, color: isDarkMode ? Colors.white : Colors.black, size: 24), 
-        onPressed: widget.onAttachmentTap,
-        padding: EdgeInsets.zero,
-        tooltip: 'Attach',
       ),
     );
   }
@@ -666,7 +671,7 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
   Widget _buildMicButton() {
     return GestureDetector(
       onTap: () {
-        print('[UI] Mic button tapped in ExpandableInputBox');
+        // debugPrint('[UI] Mic button tapped in ExpandableInputBox');
         widget.onVoiceTap?.call();
       },
       child: Container(
@@ -692,7 +697,8 @@ class _ExpandableInputBoxState extends ConsumerState<ExpandableInputBox>
     return GestureDetector(
       onTap: () {
         widget.controller.clear();
-        widget.onVoiceTap?.call();
+        // Use restart callback if available, otherwise fall back to onVoiceTap
+        (widget.onVoiceRestart ?? widget.onVoiceTap)?.call();
       },
       child: Container(
         width: 30,

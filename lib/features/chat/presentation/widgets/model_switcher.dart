@@ -9,7 +9,7 @@ class AIModelConfig {
   final String id;
   final String displayName;
   final String description;
-  final IconData icon;
+  final dynamic icon;
   final bool isPremium;
 
   const AIModelConfig({

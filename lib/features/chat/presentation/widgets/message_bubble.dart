@@ -43,14 +43,14 @@ class MessageBubble extends ConsumerStatefulWidget {
 }
 
 class _MessageBubbleState extends ConsumerState<MessageBubble> {
-  bool _isEditing = false;
-  late TextEditingController _editController;
   bool _isHovered = false;
+  bool _isEditing = false;
+  final TextEditingController _editController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _editController = TextEditingController(text: widget.message.content);
+    _editController.text = widget.message.content;
   }
 
   @override
@@ -82,72 +82,56 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
   }
 
   Widget _buildUserEditMode(BuildContext context, bool isDark, double basePadding) {
-     return Container(
-       margin: EdgeInsets.symmetric(vertical: 8, horizontal: basePadding),
-       padding: const EdgeInsets.all(12),
-       decoration: BoxDecoration(
-         color: isDark ? const Color(0xFF2E2E2E) : Colors.white,
-         borderRadius: BorderRadius.circular(12),
-         border: Border.all(color: AppColors.primary, width: 1.5),
-       ),
-       child: Column(
-         crossAxisAlignment: CrossAxisAlignment.end,
-         children: [
-           TextField(
-             controller: _editController,
-             style: GoogleFonts.inter(
-               color: isDark ? Colors.white : Colors.black87,
-               fontSize: 15,
-             ),
-             maxLines: null,
-             decoration: const InputDecoration(
-               border: InputBorder.none,
-               isDense: true,
-               contentPadding: EdgeInsets.zero,
-             ),
-           ),
-           const SizedBox(height: 12),
-           Row(
-             mainAxisSize: MainAxisSize.min,
-             children: [
-               TextButton(
-                 onPressed: () {
-                   setState(() => _isEditing = false);
-                   _editController.text = widget.message.content; // Reset
-                 },
-                 style: TextButton.styleFrom(
-                   foregroundColor: isDark ? Colors.grey[400] : Colors.grey[600],
-                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                   backgroundColor: isDark ? const Color(0xFF3E3E3E) : Colors.grey[200],
-                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                 ),
-                 child: Text('Cancel', style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
-               ),
-               const SizedBox(width: 8),
-               TextButton(
-                 onPressed: () {
-                   setState(() => _isEditing = false);
-                   widget.onEdit?.call(); // This should trigger the parent to handle the update
-                   // Note: In a real app, we'd pass the new text back. 
-                   // Ideally onEdit should take a String. For now, assuming parent handles it or logic is internal.
-                   // Actually, let's assume onEdit handles the regeneration logic.
-                   // To Support "Save & Resend" properly we need to pass the new text.
-                   // For now, aligning UI as requested.
-                 },
-                 style: TextButton.styleFrom(
-                   foregroundColor: Colors.white,
-                   backgroundColor: AppColors.primary,
-                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                 ),
-                 child: Text('Save & Resend', style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
-               ),
-             ],
-           ),
-         ],
-       ),
-     );
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: basePadding, vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2E2E2E) : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.accent),
+        ),
+        child: Column(
+          children: [
+            TextField(
+              controller: _editController,
+              maxLines: null,
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => setState(() => _isEditing = false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    widget.onEdit?.call(); // Or implement specific edit logic
+                    setState(() => _isEditing = false);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
+
+
 
   /// User message: Right aligned with grey bubble
   Widget _buildUserMessage(
@@ -185,7 +169,7 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
               const SizedBox(width: 4),
                _buildQuickActionIcon(
                 icon: HugeIcons.strokeRoundedPencilEdit02,
-                onTap: () => setState(() => _isEditing = true),
+                onTap: widget.onEdit,
                 isDark: isDark,
                 tooltip: 'Edit',
               ),
@@ -500,7 +484,7 @@ class _MessageBubbleState extends ConsumerState<MessageBubble> {
           border: isDark ? Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.5) : null,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.2),
+              color: Colors.black.withValues(alpha: 0.2),
               blurRadius: 10,
               offset: const Offset(0, 5),
             ),
@@ -806,17 +790,156 @@ class _SmartCodeBuilder extends MarkdownElementBuilder {
   });
 
   @override
-  Widget visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
     final hasClass = element.attributes.containsKey('class');
     final hasNewlines = element.textContent.contains('\n');
     
+    // Check for "Research completed" blockquote
+    if (element.tag == 'blockquote' && element.textContent.contains('Research completed in')) {
+       return _ResearchSummaryBuilder(isDark: isDark).visitElementAfterWithContext(context, element, preferredStyle, parentStyle);
+    }
+
+    // Check for citations [Domain.com] or [1]
+    // Regex: ^\[(.*?)\]$ match
+    final text = element.textContent;
+    if (element.tag == 'a' && text.startsWith('[') && text.endsWith(']')) {
+         return _CitationChipBuilder(isDark: isDark).visitElementAfterWithContext(context, element, preferredStyle, parentStyle);
+    }
+
     if (hasClass || hasNewlines) {
-      return blockBuilder.visitElementAfter(element, preferredStyle)!;
+      return blockBuilder.visitElementAfterWithContext(context, element, preferredStyle, parentStyle);
     } else {
-      return inlineBuilder.visitElementAfter(element, preferredStyle)!;
+      return inlineBuilder.visitElementAfterWithContext(context, element, preferredStyle, parentStyle);
     }
   }
 }
+
+class _CitationChipBuilder extends MarkdownElementBuilder {
+  final bool isDark;
+  _CitationChipBuilder({required this.isDark});
+
+  @override
+  Widget? visitElementAfterWithContext(BuildContext context, md.Element element, TextStyle? preferredStyle, TextStyle? parentStyle) {
+    // Extract URL from href if it's a link, otherwise use text content
+    final href = element.attributes['href'];
+    final displayText = element.textContent.replaceAll('[', '').replaceAll(']', '');
+    
+    return GestureDetector(
+      onTap: () async {
+        if (href != null && href.isNotEmpty) {
+          final uri = Uri.tryParse(href);
+          if (uri != null && await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[200],
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey[300]!,
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              displayText,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+            const SizedBox(width: 3),
+            HugeIcon(
+              icon: HugeIcons.strokeRoundedLinkSquare02,
+              size: 10,
+              color: isDark ? Colors.white38 : Colors.grey[600]!,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders the "Research completed..." footer
+class _ResearchSummaryBuilder extends MarkdownElementBuilder {
+  final bool isDark;
+
+  _ResearchSummaryBuilder({required this.isDark});
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    // textContent: "Research completed in 6m · 34 sources · 146 searches"
+    final text = element.textContent.trim();
+    
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF171717) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.grey[300]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+            HugeIcon(icon: HugeIcons.strokeRoundedTaskDaily02, size: 16, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+            const SizedBox(width: 8),
+            Text(
+              text, // e.g. "Research completed in..."
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+             const SizedBox(width: 8),
+            // "Sources" button (opens sheet)
+            GestureDetector(
+                onTap: () {
+                    // Logic to open sheet. 
+                    // Since we are inside a Markdown builder, we might need a GlobalKey or callback.
+                    // For now, let's assume we can trigger it or we need to pass a callback down.
+                    // Actually, simpler: Show "Sources" text here, user can click.
+                    // Or we extract sources from the message content in a parent widget.
+                    // Let's print for now.
+                    // print("Open Sources Sheet"); 
+                },
+                 child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[800] : Colors.grey[300],
+                        borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                        "View",
+                        style: TextStyle(fontSize: 10,  color: isDark ? Colors.white : Colors.black),
+                    ),
+                 ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 
 // ... classes continue below ...
 
@@ -826,7 +949,12 @@ class _ChatGPTCodeBlockBuilder extends MarkdownElementBuilder {
   _ChatGPTCodeBlockBuilder({required this.isDark});
 
   @override
-  Widget visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
     final code = element.textContent;
     final language = element.attributes['class']?.replaceFirst('language-', '') ?? '';
 
@@ -927,7 +1055,12 @@ class _DefaultCodeBuilder extends MarkdownElementBuilder {
   _DefaultCodeBuilder({required this.isDark});
 
   @override
-  Widget visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
     final code = element.textContent;
     
     return Container(
@@ -956,7 +1089,12 @@ class _InlineCodeBuilder extends MarkdownElementBuilder {
   _InlineCodeBuilder({required this.isDark});
 
   @override
-  Widget visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

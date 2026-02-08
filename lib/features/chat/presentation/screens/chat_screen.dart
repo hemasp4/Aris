@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+
 import 'package:hugeicons/hugeicons.dart';
 
 import '../../providers/chat_provider.dart';
@@ -26,7 +29,10 @@ import '../../../../core/components/custom_modal.dart';
 import '../widgets/group_options_menu.dart';
 import '../widgets/expandable_input_box.dart';
 import '../widgets/fetch_indicator.dart';
-import '../widgets/headline_cards.dart';
+import '../widgets/shimmer_loading.dart';
+
+import '../widgets/research_progress_capsule.dart'; // [NEW]
+import '../widgets/research_activity_panel.dart';   // [NEW]
 import 'temporary_chat_info_screen.dart';
 import 'share_link_screen.dart';
 
@@ -46,13 +52,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final FocusNode _focusNode = FocusNode();
   bool _showInfoPanel = false;
   bool _isAtBottom = true;
+  bool _showScrollButton = false; // ChatGPT-style scroll button visibility
+  Timer? _scrollButtonDebounce; // Debounce timer for hiding button
   bool _isDrawerOpen = false;
-  String? _selectedSuggestionCategory;
-
+  String? _selectedSuggestionCategory = 'All';
+  
+  // Edit State
+  String? _editingMessageId;
+  String? _editingContent;
+  
   @override
   void initState() {
     super.initState();
-    // Load sessions if not already loaded (fixes lazy loading)
+    // Verify auth token and user
     WidgetsBinding.instance.addPostFrameCallback((_) {
        // Optimize: Load sessions and messages in parallel
        final sessionFuture = ref.read(chatProvider.notifier).loadSessions();
@@ -84,13 +96,37 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // If content is not scrollable (fits on screen), consider us at bottom
       if (maxScroll <= 0) {
         if (!_isAtBottom) setState(() => _isAtBottom = true);
+        if (_showScrollButton) setState(() => _showScrollButton = false);
+        _scrollButtonDebounce?.cancel();
         return;
       }
       
       // Check if we are near bottom (within 100px)
       final isAtBottom = position.pixels >= maxScroll - 100;
+      
       if (isAtBottom != _isAtBottom) {
         setState(() => _isAtBottom = isAtBottom);
+      }
+      
+      // Cancel previous debounce timer
+      _scrollButtonDebounce?.cancel();
+      
+      if (!isAtBottom) {
+        // Not at bottom - show button while scrolling
+        if (!_showScrollButton) {
+          setState(() => _showScrollButton = true);
+        }
+        // Hide after 1s of no scrolling (ChatGPT style)
+        _scrollButtonDebounce = Timer(const Duration(seconds: 1), () {
+          if (mounted) {
+            setState(() => _showScrollButton = false);
+          }
+        });
+      } else {
+        // At bottom - hide immediately
+        if (_showScrollButton) {
+          setState(() => _showScrollButton = false);
+        }
       }
     }
   }
@@ -100,6 +136,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
+    _scrollButtonDebounce?.cancel();
     super.dispose();
   }
 
@@ -126,29 +163,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _handleVoiceTap() async {
-    print('[UI] _handleVoiceTap triggered');
+    // print('[UI] _handleVoiceTap triggered');
     final voiceNotifier = ref.read(voiceInputProvider.notifier);
     final currentState = ref.read(voiceInputProvider).state;
-    print('[UI] Current Voice State: $currentState');
+    // print('[UI] Current Voice State: $currentState');
     
     if (currentState == VoiceInputState.idle) {
       setState(() {
         _isVoiceConverted = false;
         _textBeforeVoice = _messageController.text; // Capture existing text
       });
-      print('[UI] Starting recording... appending to: $_textBeforeVoice');
+      // print('[UI] Starting recording... appending to: $_textBeforeVoice');
       
       // DO NOT CLEAR controller for append mode
       // _messageController.clear();
       
       await voiceNotifier.startRecording();
     } else if (currentState == VoiceInputState.listening) {
-      // Manual stop -> Stop streaming.
-      // The text is already updated in real-time via the listener.
-      print('[UI] Stopping recording (manual)...');
-      await voiceNotifier.stopRecording();
+      // Manual stop -> Handle text appending
+      _handleVoiceStopAndSend();
     } else {
-       print('[UI] Unhandled state tap: $currentState');
+       // print('[UI] Unhandled state tap: $currentState');
     }
   }
 
@@ -300,6 +335,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final voiceState = ref.watch(voiceInputProvider).state;
     final selectedModel = ref.watch(selectedModelProvider);
     final currentGroup = ref.watch(currentGroupProvider);
+    final chatState = ref.watch(chatProvider);
+    final isLoadingHistory = chatState.isLoading && messages.isEmpty;
     
     ref.listen(currentMessagesProvider, (previous, next) {
       if (_isAtBottom && next.length > (previous?.length ?? 0)) {
@@ -308,14 +345,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
     
     ref.listen(voiceInputProvider, (previous, current) {
-      // 1. Handle Partial & Final Text Updates
-      if (current.transcribedText != null) {
-        // Append to existing text rather than replacing
-        final prefix = _textBeforeVoice; // Captured when mic started
-        final newVoiceText = current.transcribedText!;
-        final separator = (prefix.isNotEmpty && !prefix.endsWith(' ') && newVoiceText.isNotEmpty) ? ' ' : '';
-        
-        final combinedText = '$prefix$separator$newVoiceText';
+      // 1. Handle Partial & Final Text Updates - Use accumulatedText for proper append
+      if (current.accumulatedText.isNotEmpty) {
+        // Use accumulated text from voice provider (includes all previous sessions)
+        final combinedText = current.accumulatedText;
         
         if (_messageController.text != combinedText) {
           _messageController.text = combinedText;
@@ -341,15 +374,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
            previous?.state == VoiceInputState.thinking || 
            previous?.state == VoiceInputState.transcribing ||
            previous?.state == VoiceInputState.finalizing)) {
-            // Ensure final text is captured
-            if (current.transcribedText != null && current.transcribedText!.isNotEmpty) {
-                final prefix = _textBeforeVoice;
-                final newVoiceText = current.transcribedText!;
-                final separator = (prefix.isNotEmpty && !prefix.endsWith(' ') && newVoiceText.isNotEmpty) ? ' ' : '';
-                final combinedText = '$prefix$separator$newVoiceText';
-                
-               if (_messageController.text != combinedText) {
-                 _messageController.text = combinedText;
+            // Ensure final text is captured using accumulated text
+            if (current.accumulatedText.isNotEmpty) {
+               if (_messageController.text != current.accumulatedText) {
+                 _messageController.text = current.accumulatedText;
                }
             }
       }
@@ -375,7 +403,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
 
     return Scaffold(
-      backgroundColor: AppColors.backgroundDark,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark 
+          ? AppColors.backgroundDark 
+          : AppColors.backgroundLight,
       onDrawerChanged: (isOpen) => setState(() => _isDrawerOpen = isOpen),
       drawer: const ChatSidebar(),
       endDrawer: _showInfoPanel ? null : _buildInfoDrawer(context, selectedModel),
@@ -395,58 +425,203 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Column(
+                child: Stack(
                     children: [
-                      // Custom App Bar
-                      _buildCustomAppBar(context, selectedModel, currentGroup),
+                      // Layer 1: Content (Messages) - Fills screen, scrolls behind navbar/input
+                      Positioned.fill(
+                        child: isLoadingHistory
+                            // ChatGPT-style shimmer skeleton for chat loading
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 100, bottom: 120),
+                                child: _buildChatLoadingSkeleton(),
+                              )
+                            : messages.isEmpty 
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 80, bottom: 100), // Avoid navbar/input
+                                child: _buildEmptyState(context),
+                              )
+                            : _buildMessageList(
+                                context, 
+                                messages,
+                                contentPadding: const EdgeInsets.only(top: 100, bottom: 120), // Top: Navbar + Indicator space, Bottom: Input
+                              ),
+                      ),
                       
-                      // Group chat invite banner (if in group)
+                      // Layer 1.5: Activity Indicators & Banners (Fixed Position below Navbar)
                       if (currentGroup != null && messages.isNotEmpty)
-                        _buildGroupInviteBanner(currentGroup),
-                      
-                      // Messages or empty state
-                      Expanded(
-                        child: Column(
-                          children: [
-                            // ChatGPT-style fetch indicator (thinking, searching, scraping)
-                            Consumer(
-                              builder: (context, ref, _) {
-                                final chatState = ref.watch(chatProvider);
-                                return FetchIndicator(
-                                  isThinking: chatState.isThinking,
-                                  isSearching: chatState.isSearching,
-                                  isScraping: chatState.isScraping,
-                                  scrapingSources: chatState.scrapingSources,
+                        Positioned(
+                          top: 70, // Below navbar
+                          left: 0, 
+                          right: 0,
+                          child: _buildGroupInviteBanner(currentGroup),
+                        ),
+                        
+                       // Suggestion Hints (Overlay near bottom input)
+                       // Hide when voice recording is active
+                       if (_selectedSuggestionCategory != null && 
+                           messages.isEmpty && 
+                           voiceState == VoiceInputState.idle)
+                         Positioned(
+                           bottom: 90,
+                           left: 16,
+                           right: 16,
+                           child: SuggestionHints(
+                              selectedCategory: _selectedSuggestionCategory,
+                              onHintTap: (hint) {
+                                final prefix = SuggestionData.getPromptPrefix(_selectedSuggestionCategory!);
+                                _messageController.text = '$prefix $hint';
+                                _messageController.selection = TextSelection.fromPosition(
+                                  TextPosition(offset: _messageController.text.length),
                                 );
                               },
                             ),
-                            // ChatGPT-style headline cards (Moved to MessageBubble)
-                            const SizedBox.shrink(),
-                            // Message list or empty state
-                            Expanded(
-                              child: messages.isEmpty
-                                  ? _buildEmptyState(context)
-                                  : _buildMessageList(context, messages),
+                          ),
+
+                      // Top Fog (Gradient Fade) - Matches background to fade scrolling content
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 160, // Increased height for smoother transition
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Theme.of(context).brightness == Brightness.dark 
+                                      ? AppColors.backgroundDark 
+                                      : AppColors.backgroundLight,
+                                  (Theme.of(context).brightness == Brightness.dark 
+                                      ? AppColors.backgroundDark 
+                                      : AppColors.backgroundLight).withValues(alpha: 0.0),
+                                ],
+                                stops: const [0.0, 1.0],
+                              ),
                             ),
-                          ],
+                          ),
                         ),
                       ),
-                      
-                      // Random suggestion hints (shown when category is selected)
-                      if (_selectedSuggestionCategory != null && messages.isEmpty)
-                        SuggestionHints(
-                          selectedCategory: _selectedSuggestionCategory,
-                          onHintTap: (hint) {
-                            final prefix = SuggestionData.getPromptPrefix(_selectedSuggestionCategory!);
-                            _messageController.text = '$prefix $hint';
-                            _messageController.selection = TextSelection.fromPosition(
-                              TextPosition(offset: _messageController.text.length),
+
+                      // Layer 2: Glass Navbar (Fixed Top) - Matching input box style
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildCustomAppBar(context, selectedModel, currentGroup),
+                                    
+                                    // Fetch Indicator embedded in Navbar area or just below?
+                                    // ChatGPT puts it floating. We'll stick it here for now or overlay it.
+                                    // Actually, we should check if it's cleaner to separate.
+                                  ],
+                                ),
+                      ),
+                      // Layer 2.5: Fetch Indicator (Floating below navbar)
+                      Positioned(
+                        top: 60, 
+                        left: 0, 
+                        right: 0,
+                        child: Consumer(
+                          builder: (context, ref, _) {
+                            final chatState = ref.watch(chatProvider);
+                            return FetchIndicator(
+                              isThinking: chatState.isThinking,
+                              isSearching: chatState.isSearching,
+                              isScraping: chatState.isScraping,
+                              scrapingSources: chatState.scrapingSources,
                             );
                           },
                         ),
-                      
-                      // Input area
-                      _buildInputArea(context, isStreaming, voiceState),
+                      ),
+
+                      // Bottom Fog (Gradient Fade) - Fades content before it hits input box
+                      Positioned(
+                        bottom: 0, // Anchored to bottom, behind input box
+                        left: 0,
+                        right: 0,
+                        height: 140, 
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Theme.of(context).brightness == Brightness.dark 
+                                      ? AppColors.backgroundDark 
+                                      : AppColors.backgroundLight,
+                                  (Theme.of(context).brightness == Brightness.dark 
+                                      ? AppColors.backgroundDark 
+                                      : AppColors.backgroundLight).withValues(alpha: 0.0),
+                                ],
+                                stops: const [0.0, 1.0],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Layer 2.9: Scroll to Bottom Button (ChatGPT style)
+                      if (_showScrollButton)
+                        Positioned(
+                          bottom: 90, // Above input box
+                          right: 0,
+                          left: 0,
+                          child: Center(
+                            child: GestureDetector(
+                              onTap: _scrollToBottom,
+                              child: AnimatedOpacity(
+                                opacity: _showScrollButton ? 1.0 : 0.0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).brightness == Brightness.dark
+                                        ? const Color(0xFF2F2F2F)
+                                        : Colors.white,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Theme.of(context).brightness == Brightness.dark
+                                          ? Colors.white.withValues(alpha: 0.1)
+                                          : Colors.black.withValues(alpha: 0.1),
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.15),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      size: 24,
+                                      color: Theme.of(context).brightness == Brightness.dark
+                                          ? Colors.white.withValues(alpha: 0.9)
+                                          : Colors.black.withValues(alpha: 0.8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Layer 3: Floating Input Area (Fixed Bottom)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: _editingMessageId != null
+                            ? _buildEditPanel(context)
+                            : _buildInputArea(context, isStreaming, voiceState),
+                      ),
                     ],
                   ),
                 ),
@@ -548,15 +723,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 _showModelSelectorDialog(context);
               }
             },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              // Match vertical height to approx 44px
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  // Match vertical height to approx 44px
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                        : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Colors.white.withValues(alpha: 0.08) 
+                          : Colors.black.withValues(alpha: 0.06),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ConstrainedBox(
@@ -581,6 +768,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ],
                 ],
               ),
+            ),
+          ),
             ),
           ),
           
@@ -610,16 +799,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        // Match right side pill height (36 + 4+4 = 44)
-        height: 44, 
-        width: 44,
-        padding: const EdgeInsets.all(4), 
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24), // Match right side radius
-        ),
-        child: Center(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Container(
+            // Match right side pill height (36 + 4+4 = 44)
+            height: 44, 
+            width: 44,
+            padding: const EdgeInsets.all(4), 
+            decoration: BoxDecoration(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                  : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+              borderRadius: BorderRadius.circular(24), // Match right side radius
+              border: Border.all(
+                color: Theme.of(context).brightness == Brightness.dark 
+                    ? Colors.white.withValues(alpha: 0.08) 
+                    : Colors.black.withValues(alpha: 0.06),
+                width: 1,
+              ),
+            ),
+            child: Center(
           child: HugeIcon(
             icon: icon,
             size: 20,
@@ -627,19 +828,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ),
       ),
+      ),
+      ),
     );
   }
   
   /// STATE A: Empty chat action icons (Group invite + Temp chat)
   Widget _buildEmptyChatActions() {
-    return Container(
-      key: const ValueKey('empty_actions'),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          key: const ValueKey('empty_actions'),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark 
+                ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white.withValues(alpha: 0.08) 
+                  : Colors.black.withValues(alpha: 0.06),
+              width: 1,
+            ),
+          ),
+          child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Group invite icon
@@ -670,19 +885,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ],
       ),
+      ),
+      ),
     );
   }
   
   /// STATE B: Active chat action icons (Group invite + New chat + More options)
   Widget _buildActiveChatActions(String chatTitle) {
-    return Container(
-      key: const ValueKey('active_actions'),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+        child: Container(
+          key: const ValueKey('active_actions'),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark 
+                ? const Color(0xFF1A1A1A).withValues(alpha: 0.95) 
+                : const Color(0xFFFFFFFF).withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white.withValues(alpha: 0.08) 
+                  : Colors.black.withValues(alpha: 0.06),
+              width: 1,
+            ),
+          ),
+          child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Group invite icon
@@ -711,6 +940,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             onTap: () => _showChatOptionsBottomSheet(chatTitle),
           ),
         ],
+      ),
+      ),
       ),
     );
   }
@@ -880,31 +1111,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
   
-  /// Build menu option row
-  Widget _buildMenuOption({
-    required dynamic icon,
-    required String label,
-    bool isDestructive = false,
-  }) {
-    final color = isDestructive ? AppColors.error : AppColors.textPrimary;
-    return Row(
-      children: [
-        HugeIcon(
-          icon: icon,
-          size: 20,
-          color: color,
-        ),
-        const SizedBox(width: 12),
-        Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 14,
-          ),
-        ),
-      ],
-    );
-  }
+
   
   /// Handle menu action
   Future<void> _handleMenuAction(String action) async {
@@ -1096,6 +1303,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
+  /// ChatGPT-style shimmer skeleton for chat history loading
+  Widget _buildChatLoadingSkeleton() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 20),
+          // User message shimmer (right-aligned, smaller)
+          Align(
+            alignment: Alignment.centerRight,
+            child: ShimmerLoading(
+              width: 200,
+              height: 44,
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Assistant message shimmer (left-aligned, larger)
+          ShimmerLoading(
+            width: double.infinity,
+            height: 100,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          const SizedBox(height: 24),
+          // Another user message
+          Align(
+            alignment: Alignment.centerRight,
+            child: ShimmerLoading(
+              width: 160,
+              height: 44,
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Another assistant message
+          ShimmerLoading(
+            width: double.infinity,
+            height: 80,
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
@@ -1178,7 +1431,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     ).animate().fadeIn(duration: 300.ms);
   }
 
-  Widget _buildMessageList(BuildContext context, List<ChatMessage> messages) {
+  Widget _buildMessageList(BuildContext context, List<ChatMessage> messages, {EdgeInsets? contentPadding}) {
     return Stack(
       children: [
         // Messages ListView
@@ -1189,9 +1442,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
             child: ListView.builder(
               controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: messages.length,
+              padding: contentPadding ?? const EdgeInsets.symmetric(vertical: 8),
+              itemCount: messages.length + (ref.watch(chatProvider).researchProgress != null && !ref.watch(chatProvider).researchProgress!.isComplete ? 1 : 0),
               itemBuilder: (context, index) {
+                // If index is last and we have research progress
+                final chatState = ref.watch(chatProvider);
+                if (index == messages.length && chatState.researchProgress != null && !chatState.researchProgress!.isComplete) {
+                   return Padding(
+                     padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                     child: Align(
+                       alignment: Alignment.centerLeft, // Or center, but usually left or below user
+                       child: ResearchProgressCapsule(
+                           progress: chatState.researchProgress!,
+                           onTap: () {
+                             showModalBottomSheet(
+                               context: context,
+                               isScrollControlled: true,
+                               backgroundColor: Colors.transparent,
+                               builder: (ctx) => ResearchActivityPanel(
+                                 logs: chatState.researchProgress!.logs,
+                                 onClose: () => Navigator.pop(ctx),
+                               ),
+                             );
+                           },
+                         ),
+                     ),
+                   );
+                }
+
                 final message = messages[index];
                 return MessageBubble(
                   message: message,
@@ -1206,8 +1484,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ),
                     );
                   },
+                  onEdit: () => _startEditing(message),
                   onRegenerate: message.role != 'user' ? () {
-                    // TODO: Implement regenerate response
+                    // Call regenerate on provider
+                    ref.read(chatProvider.notifier).regenerateMessage(message.id);
                   } : null,
                   onShare: () {
                     if (message.role == 'user') {
@@ -1342,6 +1622,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           onVoiceTap: _handleVoiceTap,
           onVoiceStopAndSend: _handleVoiceStopAndSend,
           onVoiceCancel: _handleVoiceCancel,
+          onVoiceRestart: () => ref.read(voiceInputProvider.notifier).restartRecording(),
           onCancelStream: () => ref.read(chatProvider.notifier).cancelStream(),
           onClearResearchMode: () {
             // Cancel ongoing search and clear research mode
@@ -1351,6 +1632,151 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           onRemoveImage: (file) {
             // TODO: Implement image removal
           },
+        ),
+      ],
+    );
+  }
+  void _startEditing(ChatMessage message) {
+    setState(() {
+      _editingMessageId = message.id;
+      _editingContent = message.content;
+      _messageController.text = message.content;
+    });
+    // Find parent to reset "Restart from here" logic? 
+    // Actually the backend handles it.
+  }
+
+  void _cancelEditing() {
+    setState(() {
+      _editingMessageId = null;
+      _editingContent = null;
+      _messageController.clear();
+    });
+    _focusNode.unfocus();
+  }
+
+  void _saveEdit() {
+    if (_editingMessageId == null) return;
+    
+    final newContent = _messageController.text.trim();
+    if (newContent.isEmpty) return;
+    
+    if (newContent == _editingContent) {
+      _cancelEditing();
+      return;
+    }
+    
+    ref.read(chatProvider.notifier).editMessage(_editingMessageId!, newContent);
+    _cancelEditing();
+  }
+
+  Widget _buildEditPanel(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Sticky Warning Snackbar (ChatGPT style)
+        Container(
+          width: double.infinity,
+          color: isDark ? const Color(0xFF2E2E2E) : Colors.grey[100],
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.info_outline, size: 14, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+              const SizedBox(width: 8),
+              Text(
+                'Editing this message will restart the conversation from here.',
+                style: TextStyle(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        // Edit Panel
+        Container(
+          color: theme.scaffoldBackgroundColor,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    HugeIcon(icon: HugeIcons.strokeRoundedPencilEdit02, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Editing message',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: _cancelEditing,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Text Area
+              Container(
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surface : Colors.grey[50], 
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: TextField(
+                  controller: _messageController,
+                  focusNode: _focusNode,
+                  maxLines: 5,
+                  minLines: 1,
+                  style: GoogleFonts.inter(
+                    color: AppColors.textPrimary,
+                    fontSize: 16,
+                  ),
+                  decoration: const InputDecoration(
+                    contentPadding: EdgeInsets.all(16),
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                  autofocus: true,
+                ),
+              ),
+              
+              const SizedBox(height: 12),
+              
+              // Actions
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton(
+                  onPressed: _saveEdit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                  child: const Text('Save & Submit'),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
